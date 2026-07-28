@@ -1,0 +1,9 @@
+.claude/
+.vscode/
+CLAUDE.md
+docs/*
+
+
+# build artifacts
+schemas/gschemas.compiled
+*.zip

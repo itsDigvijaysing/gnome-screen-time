@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.screen-time"
+          path="/org/gnome/shell/extensions/screen-time/">
+    <key name="retention-days" type="i">
+      <default>90</default>
+      <range min="0" max="365"/>
+      <summary>Data retention days</summary>
+      <description>Number of days to keep usage data. 0 means keep forever.</description>
+    </key>
+    <key name="max-interval" type="i">
+      <default>600</default>
+      <range min="60" max="3600"/>
+      <summary>Max tracking interval (seconds)</summary>
+      <description>Maximum interval between focus events before capping to prevent skewed data after suspend.</description>
+    </key>
+    <key name="purge-requested" type="i">
+      <default>0</default>
+      <summary>Manual purge trigger</summary>
+      <description>Internal, not user-facing. Set by the prefs UI to a unix timestamp to request an immediate one-time deletion of usage data older than 7 days.</description>
+    </key>
+    <key name="show-total-in-panel" type="b">
+      <default>true</default>
+      <summary>Show today's total in the panel</summary>
+      <description>When enabled the panel shows the icon plus today's total screen time; when disabled only the icon is shown.</description>
+    </key>
+    <key name="app-limits" type="a{si}">
+      <default>{}</default>
+      <summary>Per-app daily time limits</summary>
+      <description>Maps an application id to a daily limit in minutes. When today's tracked time for that app reaches its limit, a one-time notification is shown for the rest of the day.</description>
+    </key>
+  </schema>
+</schemalist>
