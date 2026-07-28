@@ -1,0 +1,9 @@
+{
+    "name": "Screen Time",
+    "description": "See how long you spend in each app, macOS Screen Time style.\n\nA panel indicator shows today's total at a glance, and the popup breaks it down per app with a bar chart. Step back through previous days one at a time.\n\n• Per-app daily time limits with a desktop notification when you cross one\n• 7-day history chart in preferences\n• Configurable data retention, plus a one-click purge\n• Time spent on the lock screen, while the screen is blanked, or while suspended is never counted\n\nEverything is stored locally in a plain JSON file. No network access, no telemetry.",
+    "uuid": "screen-time@gnome-screen-time",
+    "url": "https://github.com/itsdigvijaysing/gnome-screen-time",
+    "shell-version": ["47", "48", "49", "50"],
+    "version-name": "1.0.0",
+    "settings-schema": "org.gnome.shell.extensions.screen-time"
+}

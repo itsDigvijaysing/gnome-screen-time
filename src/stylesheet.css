@@ -1,0 +1,25 @@
+/* Loaded automatically by GNOME Shell — never load it manually.
+ * Hover states live here because inline `style` cannot express pseudo-classes.
+ * Colours are deliberately neutral gray so they read correctly on both light
+ * and dark Shell themes. */
+
+.screen-time-nav-button,
+.screen-time-settings-button {
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition-duration: 150ms;
+}
+
+.screen-time-nav-button:hover,
+.screen-time-settings-button:hover {
+    background-color: rgba(128, 128, 128, 0.25);
+}
+
+.screen-time-nav-button:active,
+.screen-time-settings-button:active {
+    background-color: rgba(128, 128, 128, 0.4);
+}
+
+.screen-time-card {
+    transition-duration: 150ms;
+}

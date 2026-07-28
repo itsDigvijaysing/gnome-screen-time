@@ -7,10 +7,9 @@ import { todayKey } from './usageStore.js';
 
 const ROW_W = 230;
 const BAR_W = ROW_W - 16;
-// Neutral grays, not tinted toward light or dark — these read correctly on both
+// Neutral gray, not tinted toward light or dark — reads correctly on both
 // light and dark Shell themes, unlike a translucent white/black overlay.
 const TRACK_BG = 'rgba(128,128,128,0.18)';
-const CARD_BG = 'rgba(128,128,128,0.15)';
 // Secondary text is dimmed with actor opacity rather than a fixed color: it
 // stays correct under any theme because it fades whatever foreground colour
 // the theme already supplies. (St has no `dim-label` — that is a GTK class.)
@@ -18,6 +17,32 @@ const DIM_OPACITY = 160;
 const MAX_VISIBLE = 5;
 const MIN_ROW_SECONDS = 60;
 const COLORS = ['#3584e4', '#33d17a', '#e5a50a', '#9141ac', '#ed333b'];
+
+// The card paints its own light background, so it also has to set its own dark
+// foreground — inheriting the theme's colour would give white-on-pastel in a
+// dark session. Adwaita's darkest neutral reads well on all three tiers.
+const CARD_FG = '#241f31';
+
+// Usage tiers, from the Adwaita palette. Each step lightens by one shade on
+// hover. St has no `linear-gradient()`; it uses background-gradient-* instead.
+const USAGE_TIERS = [
+    {limit: 2 * 3600, from: '#8ff0a4', to: '#57e389', hoverFrom: '#b3f7c4', hoverTo: '#8ff0a4'},
+    {limit: 5 * 3600, from: '#99c1f1', to: '#62a0ea', hoverFrom: '#bfd8f7', hoverTo: '#99c1f1'},
+    {limit: Infinity, from: '#ffbdb6', to: '#f66151', hoverFrom: '#ffd6d1', hoverTo: '#ffbdb6'},
+];
+
+function tierFor(seconds) {
+    return USAGE_TIERS.find(t => seconds < t.limit) ?? USAGE_TIERS.at(-1);
+}
+
+function cardStyle(tier, hover) {
+    let from = hover ? tier.hoverFrom : tier.from;
+    let to = hover ? tier.hoverTo : tier.to;
+    return 'margin: 4px 10px 2px 10px; padding: 10px 14px; border-radius: 14px; ' +
+           'background-gradient-direction: vertical; ' +
+           'background-gradient-start: ' + from + '; ' +
+           'background-gradient-end: ' + to + ';';
+}
 
 function keyToDate(key) {
     let [y, m, d] = key.split('-').map(Number);
@@ -38,9 +63,10 @@ function labelForKey(key) {
 }
 
 export class PopupWidget {
-    constructor(menu, store, openPrefs) {
+    constructor(menu, store, settings, openPrefs) {
         this._menu = menu;
         this._store = store;
+        this._settings = settings;
         this._openPrefs = openPrefs;
         this._date = todayKey();
 
@@ -54,6 +80,16 @@ export class PopupWidget {
     _refresh() {
         this._date = todayKey();
         this._build();
+    }
+
+    // How far back paging is allowed. Within the retention window every day is
+    // reachable even if it holds no data — landing on an empty day shows an
+    // explicit "no data" panel, which beats a dead arrow that ignores clicks.
+    _earliestKey() {
+        let retention = this._settings.get_int('retention-days');
+        if (retention > 0)
+            return shiftKey(todayKey(), -retention);
+        return this._store.getOldestDate() ?? todayKey();
     }
 
     _build() {
@@ -73,9 +109,11 @@ export class PopupWidget {
             empty.track_hover = false;
             empty.style = 'padding: 0;';
             empty.add_child(new St.Label({
-                text: 'No Data',
+                text: 'No data for this day',
                 opacity: DIM_OPACITY,
-                style: 'font-size: 12px; padding: 12px;',
+                x_expand: true,
+                x_align: Clutter.ActorAlign.CENTER,
+                style: 'font-size: 12px; padding: 14px;',
             }));
             this._menu.addMenuItem(empty);
         } else {
@@ -114,9 +152,7 @@ export class PopupWidget {
             style: 'padding: 2px 6px 0 6px;',
         });
 
-        let oldest = this._store.getOldestDate();
-        // Stop paging back once there is nothing older on record.
-        let canPrev = oldest !== null && this._date > oldest;
+        let canPrev = this._date > this._earliestKey();
         let canNext = this._date < todayKey();
 
         row.add_child(this._navButton('go-previous-symbolic', canPrev, () => {
@@ -144,10 +180,10 @@ export class PopupWidget {
     _navButton(iconName, enabled, onClick) {
         let btn = new St.Button({
             child: new St.Icon({icon_name: iconName, icon_size: 14}),
-            style: 'padding: 4px 8px; border-radius: 6px;',
+            style_class: 'screen-time-nav-button',
             reactive: enabled,
             can_focus: enabled,
-            opacity: enabled ? 255 : 60,
+            opacity: enabled ? 255 : 55,
         });
         if (enabled)
             btn.connect('clicked', onClick);
@@ -159,21 +195,32 @@ export class PopupWidget {
         item.track_hover = false;
         item.style = 'padding: 0;';
 
+        let tier = tierFor(total);
         let card = new St.BoxLayout({
-            vertical: true,
             x_expand: true,
-            style: 'margin: 4px 10px 2px 10px; padding: 10px 12px; ' +
-                   'background-color: ' + CARD_BG + '; border-radius: 12px;',
+            reactive: true,
+            track_hover: true,
+            style_class: 'screen-time-card',
+            style: cardStyle(tier, false),
         });
+
         card.add_child(new St.Label({
-            text: 'Screen Time',
-            opacity: DIM_OPACITY,
-            style: 'font-size: 10px;',
+            text: 'Total Screen Time',
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'font-size: 12px; font-weight: 600; color: ' + CARD_FG + ';',
         }));
+        card.add_child(new St.BoxLayout({x_expand: true}));
         card.add_child(new St.Label({
             text: total > 0 ? formatTime(total) : '0m',
-            style: 'font-size: 20px; font-weight: 800; padding-top: 2px;',
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'font-size: 17px; font-weight: 800; color: ' + CARD_FG + ';',
         }));
+
+        // The gradient is per-usage and therefore inline, which outranks any
+        // stylesheet :hover rule — so the hover swap is done here instead.
+        card.connect('notify::hover', () => {
+            card.style = cardStyle(tier, card.hover);
+        });
 
         item.add_child(card);
         this._menu.addMenuItem(item);
@@ -299,7 +346,7 @@ export class PopupWidget {
 
         let btn = new St.Button({
             child: new St.Icon({icon_name: 'preferences-system-symbolic', icon_size: 14}),
-            style: 'padding: 4px 6px; border-radius: 6px;',
+            style_class: 'screen-time-settings-button',
             opacity: DIM_OPACITY,
             can_focus: true,
         });
@@ -322,6 +369,7 @@ export class PopupWidget {
         }
         this._menu = null;
         this._store = null;
+        this._settings = null;
         this._openPrefs = null;
     }
 };

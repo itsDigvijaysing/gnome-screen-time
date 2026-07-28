@@ -1,8 +1,0 @@
-{
-  "name": "Screen Time",
-  "description": "Track application usage time in GNOME panel",
-  "uuid": "screen-time@king",
-  "shell-version": ["47", "48", "49", "50"],
-  "version": 1,
-  "settings-schema": "org.gnome.shell.extensions.screen-time"
-}

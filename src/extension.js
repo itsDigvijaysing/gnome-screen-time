@@ -13,7 +13,7 @@ export default class ScreenTimeExtension extends Extension {
         this._indicator = new PanelIndicator();
         this._indicator.addToPanel(this.uuid);
         this._popup = new PopupWidget(this._indicator.menu, this._store,
-            () => this.openPreferences());
+            this._settings, () => this.openPreferences());
         this._tracker = new UsageTracker(this._store, this._settings);
         this._limitNotifier = new LimitNotifier(this._settings);
 
