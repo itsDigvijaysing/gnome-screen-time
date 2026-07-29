@@ -24,8 +24,8 @@ export default class ScreenTimeExtension extends Extension {
         };
         this._indicator.setTotal(this._store.getTodayTotal());
 
-        this._panelSettingId = this._settings.connect(
-            'changed::show-total-in-panel', () => this._syncPanelLabel());
+        this._settings.connectObject(
+            'changed::show-total-in-panel', () => this._syncPanelLabel(), this);
         this._syncPanelLabel();
     }
 
@@ -35,10 +35,7 @@ export default class ScreenTimeExtension extends Extension {
     }
 
     disable() {
-        if (this._panelSettingId) {
-            this._settings.disconnect(this._panelSettingId);
-            this._panelSettingId = null;
-        }
+        this._settings.disconnectObject(this);
         this._tracker?.destroy();
         this._tracker = null;
         this._popup?.destroy();

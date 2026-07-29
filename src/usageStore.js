@@ -35,7 +35,7 @@ export class UsageStore {
         this._data = {};
         this._dirty = false;
         this._loaded = false;
-        this._destroyed = false;
+        this._cancellable = new Gio.Cancellable();
         this.onChange = null;
         this._ensureDir();
         this._load();
@@ -67,15 +67,16 @@ export class UsageStore {
         let loaded = null;
         try {
             let [contents] = await Gio.File.new_for_path(STORE_FILE)
-                .load_contents_async(null);
+                .load_contents_async(this._cancellable);
             loaded = JSON.parse(new TextDecoder().decode(contents));
         } catch (e) {
+            // Cancelled by destroy() — the store is gone, nothing left to do.
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                return;
             // A missing file is the normal first-run case, not an error.
             if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
                 log('[ScreenTime] load error: ' + e.message);
         }
-        if (this._destroyed)
-            return;
 
         if (loaded)
             this._merge(loaded);
@@ -198,7 +199,7 @@ export class UsageStore {
     }
 
     destroy() {
-        this._destroyed = true;
+        this._cancellable.cancel();
         if (this._autoSaveId) {
             GLib.source_remove(this._autoSaveId);
             this._autoSaveId = null;
