@@ -16,12 +16,15 @@ export function todayKey() {
 
 // appId -> displayName for every app that appears anywhere in `data`. Shared
 // by UsageStore (live in-memory data) and prefs.js (data read from disk) so
-// both pick from the exact same set of "known" apps.
+// both pick from the exact same set of "known" apps. Skips "Unknown" —
+// Shell's fallback name for windows it can't identify, not a real app.
 export function knownAppsFromData(data) {
     let known = new Map();
     for (let day of Object.values(data)) {
-        for (let [appId, info] of Object.entries(day))
-            known.set(appId, info.displayName);
+        for (let [appId, info] of Object.entries(day)) {
+            if (info.displayName !== 'Unknown')
+                known.set(appId, info.displayName);
+        }
     }
     return known;
 }
