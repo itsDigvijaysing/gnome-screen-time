@@ -109,7 +109,7 @@ export class PopupWidget {
                 opacity: DIM_OPACITY,
                 x_expand: true,
                 x_align: Clutter.ActorAlign.CENTER,
-                style: 'font-size: 12px; padding: 14px;',
+                style: `font-size: 12px; padding: 14px; width: ${ROW_W}px;`,
             }));
             this._menu.addMenuItem(empty);
         } else {

@@ -1,5 +1,6 @@
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
+import Pango from 'gi://Pango';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { formatTime } from './formatTime.js';
 import { todayKey } from './usageStore.js';
@@ -165,16 +166,18 @@ export class AppTimerSection {
     _addTimerRow(appId, displayName, usedSeconds, limitMinutes, rebuild) {
         let row = new St.BoxLayout({
             vertical: true,
-            style: `padding: 5px 12px; width: ${ROW_W}px;`,
+            style: `padding: 4px 10px; width: ${ROW_W}px;`,
         });
 
         let limitSeconds = limitMinutes * 60;
         let topRow = new St.BoxLayout();
-        topRow.add_child(new St.Label({
+        let nameLabel = new St.Label({
             text: displayName,
+            x_expand: true,
             style: 'font-size: 11px; font-weight: 500;',
-        }));
-        topRow.add_child(new St.BoxLayout({x_expand: true}));
+        });
+        nameLabel.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        topRow.add_child(nameLabel);
         topRow.add_child(new St.Label({
             text: `${formatTime(usedSeconds)} / ${formatTime(limitSeconds)}`,
             opacity: DIM_OPACITY,
