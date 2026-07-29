@@ -48,7 +48,7 @@ Open from the gear icon at the bottom of the popup, or:
 gnome-extensions prefs screen-time@gnome-screen-time
 ```
 
-![Settings](assets/settings.png)
+![Settings](assets/Settings.png)
 
 ## Settings
 

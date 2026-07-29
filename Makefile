@@ -1,5 +1,5 @@
 UUID          = screen-time@gnome-screen-time
-VERSION       = 1.0.0
+VERSION       = 1.1.0
 EXTENSION_DIR = $(HOME)/.local/share/gnome-shell/extensions/$(UUID)
 SRC_DIR       = src
 SCHEMAS_DIR   = $(SRC_DIR)/schemas
