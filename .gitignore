@@ -2,6 +2,7 @@
 .vscode/
 CLAUDE.md
 docs/*
+.superpowers/
 
 
 # build artifacts

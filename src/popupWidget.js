@@ -4,27 +4,23 @@ import Clutter from 'gi://Clutter';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { formatTime } from './formatTime.js';
 import { todayKey } from './usageStore.js';
+import { AppTimerSection } from './appTimerSection.js';
 
 const ROW_W = 230;
 const BAR_W = ROW_W - 16;
-// Neutral gray, not tinted toward light or dark — reads correctly on both
-// light and dark Shell themes, unlike a translucent white/black overlay.
+// Neutral gray reads correctly on both light and dark Shell themes.
 const TRACK_BG = 'rgba(128,128,128,0.18)';
-// Secondary text is dimmed with actor opacity rather than a fixed color: it
-// stays correct under any theme because it fades whatever foreground colour
-// the theme already supplies. (St has no `dim-label` — that is a GTK class.)
+// Actor opacity, not a fixed color, so it fades whatever the theme supplies
+// (St has no `dim-label` — that's a GTK class).
 const DIM_OPACITY = 160;
 const MAX_VISIBLE = 5;
 const MIN_ROW_SECONDS = 60;
 const COLORS = ['#3584e4', '#33d17a', '#e5a50a', '#9141ac', '#ed333b'];
 
-// The card paints its own light background, so it also has to set its own dark
-// foreground — inheriting the theme's colour would give white-on-pastel in a
-// dark session. Adwaita's darkest neutral reads well on all three tiers.
+// The card paints its own background, so it needs its own dark-mode foreground too.
 const CARD_FG = '#241f31';
 
-// Usage tiers, from the Adwaita palette. Each step lightens by one shade on
-// hover. St has no `linear-gradient()`; it uses background-gradient-* instead.
+// Adwaita palette; each tier lightens one shade on hover.
 const USAGE_TIERS = [
     {limit: 2 * 3600, from: '#8ff0a4', to: '#57e389', hoverFrom: '#b3f7c4', hoverTo: '#8ff0a4'},
     {limit: 5 * 3600, from: '#99c1f1', to: '#62a0ea', hoverFrom: '#bfd8f7', hoverTo: '#99c1f1'},
@@ -69,6 +65,7 @@ export class PopupWidget {
         this._settings = settings;
         this._openPrefs = openPrefs;
         this._date = todayKey();
+        this._timerSection = new AppTimerSection(store, settings);
 
         this._build();
 
@@ -79,12 +76,12 @@ export class PopupWidget {
 
     _refresh() {
         this._date = todayKey();
+        this._timerSection.reset();
         this._build();
     }
 
-    // How far back paging is allowed. Within the retention window every day is
-    // reachable even if it holds no data — landing on an empty day shows an
-    // explicit "no data" panel, which beats a dead arrow that ignores clicks.
+    // How far back paging is allowed — every day in the retention window,
+    // even empty ones (they render a "no data" panel instead of a dead arrow).
     _earliestKey() {
         let retention = this._settings.get_int('retention-days');
         if (retention > 0)
@@ -96,8 +93,7 @@ export class PopupWidget {
         this._menu.removeAll();
 
         let all = this._store.getUsageForDate(this._date);
-        // The true total, including apps too short to earn their own row — this
-        // is the same number the panel label shows, so the two always agree.
+        // Same number the panel label shows, so the two can never disagree.
         let total = this._store.getTotalForDate(this._date);
 
         this._addDateNav();
@@ -133,6 +129,9 @@ export class PopupWidget {
         }
 
         this._addSeparator();
+        this._timerSection.build(this._menu, () => this._build());
+        if (this._timerSection.isOpen)
+            this._addSeparator();
         this._addFooter();
     }
 
@@ -149,7 +148,7 @@ export class PopupWidget {
 
         let row = new St.BoxLayout({
             x_expand: true,
-            style: 'padding: 2px 6px 0 6px;',
+            style: 'padding: 10px 10px; min-height: 20px;',
         });
 
         let canPrev = this._date > this._earliestKey();
@@ -342,7 +341,8 @@ export class PopupWidget {
         item.style = 'padding: 0;';
 
         let row = new St.BoxLayout({x_expand: true, style: 'padding: 0 8px 2px 8px;'});
-        row.add_child(new St.BoxLayout({x_expand: true}));   // pushes the button right
+        row.add_child(this._timerSection.createToggleButton(() => this._build()));
+        row.add_child(new St.BoxLayout({x_expand: true}));   // pushes the settings button right
 
         let btn = new St.Button({
             child: new St.Icon({icon_name: 'preferences-system-symbolic', icon_size: 14}),
@@ -371,5 +371,6 @@ export class PopupWidget {
         this._store = null;
         this._settings = null;
         this._openPrefs = null;
+        this._timerSection = null;
     }
 };

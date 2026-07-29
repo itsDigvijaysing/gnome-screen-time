@@ -3,8 +3,9 @@ import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 import GLib from 'gi://GLib';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
-import { STORE_FILE } from './usageStore.js';
+import { STORE_FILE, knownAppsFromData } from './usageStore.js';
 import { formatTime } from './formatTime.js';
+import { getAppLimits, setAppLimit, removeAppLimit } from './appLimits.js';
 
 const HISTORY_DAYS = 7;
 const CHART_HEIGHT = 110;
@@ -12,9 +13,7 @@ const CHART_HEIGHT = 110;
 // as one product.
 const BAR_RGB = [0x35 / 255, 0x84 / 255, 0xe4 / 255];
 
-// Reading synchronously is fine here and deliberately not shared with
-// usageStore.js: prefs runs in its own process, so a brief blocking read
-// can't stutter the compositor the way it would in shell code.
+// Sync read is fine here — prefs runs in its own process, not the compositor.
 function loadUsageData() {
     let file = Gio.File.new_for_path(STORE_FILE);
     if (!file.query_exists(null))
@@ -200,13 +199,8 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
         });
         page.add(limitsGroup);
 
-        // Only apps you've actually used can be picked — sourced from tracked
-        // history rather than a full system app scan.
-        const knownApps = new Map(); // appId -> displayName
-        for (let day of Object.values(data)) {
-            for (let [appId, info] of Object.entries(day))
-                knownApps.set(appId, info.displayName);
-        }
+        // Only apps you've actually used can be picked, not a full system app scan.
+        const knownApps = knownAppsFromData(data);
         const appIds = [...knownApps.keys()].sort(
             (a, b) => knownApps.get(a).localeCompare(knownApps.get(b)));
 
@@ -223,9 +217,7 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
                 css_classes: ['flat'],
             });
             removeButton.connect('clicked', () => {
-                let current = settings.get_value('app-limits').deep_unpack();
-                delete current[appId];
-                settings.set_value('app-limits', new GLib.Variant('a{si}', current));
+                removeAppLimit(settings, appId);
                 limitsGroup.remove(row);
                 limitRows.delete(appId);
             });
@@ -234,10 +226,9 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
             limitRows.set(appId, row);
         };
 
-        // Every configured limit is listed, even if that app has dropped out of
-        // the retained history — the limit is still enforced, so it has to stay
-        // visible and removable (falls back to the raw app id for its title).
-        let limits = settings.get_value('app-limits').deep_unpack();
+        // Listed even if the app dropped out of retained history — the limit is
+        // still enforced, so it must stay visible and removable.
+        let limits = getAppLimits(settings);
         for (let [appId, minutes] of Object.entries(limits))
             addLimitRow(appId, minutes);
 
@@ -263,9 +254,7 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
         addButton.connect('clicked', () => {
             let appId = appIds[appDropDown.selected];
             let minutes = minutesSpin.get_value_as_int();
-            let current = settings.get_value('app-limits').deep_unpack();
-            current[appId] = minutes;
-            settings.set_value('app-limits', new GLib.Variant('a{si}', current));
+            setAppLimit(settings, appId, minutes);
             if (limitRows.has(appId))
                 limitsGroup.remove(limitRows.get(appId));
             addLimitRow(appId, minutes);

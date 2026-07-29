@@ -1,5 +1,6 @@
 import GLib from 'gi://GLib';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import { getAppLimits } from './appLimits.js';
 
 export class LimitNotifier {
     constructor(settings) {
@@ -7,10 +8,9 @@ export class LimitNotifier {
         this._notifiedToday = {}; // appId -> 'YYYY-MM-DD' of last notification
     }
 
-    // Called with the app that just had time added and its up-to-date
-    // today-total, straight from UsageStore.onChange — no extra data lookups.
+    // Driven by UsageStore.onChange, so no extra data lookups are needed here.
     checkLimit(appId, displayName, todaySeconds) {
-        let limitMinutes = this._settings.get_value('app-limits').deep_unpack()[appId];
+        let limitMinutes = getAppLimits(this._settings)[appId];
         if (!limitMinutes || todaySeconds < limitMinutes * 60)
             return;
 

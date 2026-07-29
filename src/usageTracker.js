@@ -3,10 +3,8 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as LoginManager from 'resource:///org/gnome/shell/misc/loginManager.js';
 
-// How often to flush time for the app that's been continuously focused,
-// independent of focus-change events. Without this, a 30-minute app limit
-// (or the panel's live total) would never update while sitting in one app
-// with no window switches. Matches UsageStore's own autosave cadence.
+// Periodic flush so a long unbroken session still updates the total/limit
+// checks without a focus change. Matches UsageStore's autosave cadence.
 const FLUSH_INTERVAL = 30;
 
 export class UsageTracker {
@@ -17,19 +15,8 @@ export class UsageTracker {
         this._appId = null;
         this._appName = null;
 
-        // Presence is derived from three independent sources so that tracking
-        // degrades gracefully across environments:
-        //
-        //  1. screenShield 'active-changed' — the screen blanking/curtain, which
-        //     fires *before* the lock and also fires when locking is disabled
-        //     but blanking is not.
-        //  2. screenShield 'locked-changed' — the actual lock.
-        //  3. logind 'prepare-for-sleep' — suspend/resume, which no shield
-        //     signal covers; without it, resuming credits the whole sleep gap
-        //     (capped at max-interval) to whatever was focused.
-        //
-        // Main.screenShield only exists when GNOME can lock at all (it needs
-        // GDM + systemd), so it is optional; max-interval remains the backstop.
+        // screenShield only exists when GNOME can lock at all (GDM + systemd),
+        // so presence detection treats it as optional; max-interval is the backstop.
         this._shield = Main.screenShield ?? null;
         this._away = this._computeAway();
 
@@ -47,8 +34,7 @@ export class UsageTracker {
                 'relying on suspend detection and max-interval');
         }
 
-        // getLoginManager() always returns an emitter — a no-op dummy without
-        // systemd — so connecting is safe regardless of the host system.
+        // Always returns an emitter (a no-op dummy without systemd), so this is safe.
         this._loginManager = LoginManager.getLoginManager();
         this._sleepId = this._loginManager.connect(
             'prepare-for-sleep',
@@ -76,9 +62,7 @@ export class UsageTracker {
         if (!app)
             return null;
 
-        // Apps with no .desktop file (typically AppImages) get a synthetic
-        // "window-backed" app whose id is `window:<n>` — a different id on
-        // every launch, which would scatter one app across many entries.
+        // window-backed apps (no .desktop file) get a per-launch `window:<n>` id;
         // WM_CLASS is stable across launches, so key those off it instead.
         if (app.is_window_backed()) {
             let wmClass = win.get_wm_class();

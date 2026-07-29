@@ -14,6 +14,18 @@ export function todayKey() {
     return GLib.DateTime.new_now_local().format('%Y-%m-%d');
 }
 
+// appId -> displayName for every app that appears anywhere in `data`. Shared
+// by UsageStore (live in-memory data) and prefs.js (data read from disk) so
+// both pick from the exact same set of "known" apps.
+export function knownAppsFromData(data) {
+    let known = new Map();
+    for (let day of Object.values(data)) {
+        for (let [appId, info] of Object.entries(day))
+            known.set(appId, info.displayName);
+    }
+    return known;
+}
+
 export class UsageStore {
     constructor(settings) {
         this._settings = settings;
@@ -46,10 +58,8 @@ export class UsageStore {
             dir.make_directory_with_parents(null);
     }
 
-    // Async on purpose: this runs in the compositor process, where blocking on
-    // disk IO can drop frames (and trips the EGO review rule against sync file
-    // IO in shell code). Time tracked before the read lands is merged in, not
-    // discarded.
+    // Async so disk IO can't drop compositor frames (EGO-X-004). Time tracked
+    // before the read lands is merged in, not discarded.
     async _load() {
         let loaded = null;
         try {
@@ -150,9 +160,8 @@ export class UsageStore {
         return this.getTotalForDate(todayKey());
     }
 
-    // Per-app usage for one day, biggest first. Unfiltered — callers decide
-    // what is worth showing, so that a filtered list can still be reconciled
-    // against getTotalForDate().
+    // Per-app usage for one day, biggest first, unfiltered — callers decide
+    // what's worth showing.
     getUsageForDate(dateKey) {
         let day = this._data[dateKey];
         if (!day)
@@ -179,6 +188,10 @@ export class UsageStore {
         if (keys.length === 0)
             return null;
         return keys.reduce((a, b) => (a < b ? a : b));
+    }
+
+    getKnownApps() {
+        return knownAppsFromData(this._data);
     }
 
     destroy() {
