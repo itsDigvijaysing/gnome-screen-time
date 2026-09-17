@@ -30,10 +30,31 @@ build: schemas
 # Install to the local GNOME Shell extensions directory. Copying the whole of
 # src/ means a new module never has to be registered anywhere. If it is in
 # src/, it ships.
+#
+# The new copy is built outside the extensions directory and swapped in with
+# mv, never copied over the files already there. A running Shell keeps
+# schemas/gschemas.compiled memory-mapped; rewriting those bytes under the
+# same inode changes what the live mapping reads, and a GSettings lookup that
+# then fails takes the session down with it. Renaming leaves the old inode
+# intact for anything still holding it.
 install: build
-	@mkdir -p $(EXTENSION_DIR)
-	@cp -r $(SRC_DIR)/* $(EXTENSION_DIR)/
-	@echo "Installed to $(EXTENSION_DIR)"
+	@set -e; \
+	ext='$(EXTENSION_DIR)'; \
+	if [ -z "$$ext" ]; then echo "install: EXTENSION_DIR must not be empty" >&2; exit 1; fi; \
+	root=$$(dirname "$$(dirname "$$ext")"); \
+	stage="$$root/.$(UUID).staging"; old="$$root/.$(UUID).old"; \
+	if [ ! -e "$$ext" ] && [ -e "$$old" ]; then mv "$$old" "$$ext"; fi; \
+	rm -rf "$$old" "$$stage"; \
+	mkdir -p "$$(dirname "$$ext")"; \
+	cp -r "$(SRC_DIR)" "$$stage"; \
+	if [ -e "$$ext" ]; then mv "$$ext" "$$old"; fi; \
+	if ! mv "$$stage" "$$ext"; then \
+		if [ -e "$$old" ]; then mv "$$old" "$$ext"; fi; \
+		echo "install: FAILED to activate new copy at $$ext; rolled back to the previous install" >&2; \
+		exit 1; \
+	fi; \
+	rm -rf "$$old"; \
+	echo "Installed to $$ext"
 	@# A dev copy from `make reload` would otherwise stay enabled across
 	@# logins with the production copy switched off; installing means we
 	@# are done iterating.
@@ -110,6 +131,7 @@ check:
 # usage.json.
 test:
 	@gjs -m tests/run.js
+	@tests/install.sh
 
 lint:
 	@if command -v eslint >/dev/null 2>&1; then \
