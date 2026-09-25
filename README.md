@@ -92,7 +92,7 @@ make reload     # load src/ into the running Shell under a fresh dev UUID (no lo
 make unreload   # back to the installed production copy
 make uninstall
 make check      # syntax-check every module + validate metadata.json
-make test       # unit tests under plain gjs (tests/)
+make test       # unit tests under plain gjs (tests/), then tests/install.sh
 make pack       # build dist/screen-time@gnome-screen-time.shell-extension.zip
 make clean
 ```

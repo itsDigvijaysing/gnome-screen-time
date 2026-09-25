@@ -30,10 +30,20 @@ build: schemas
 # Install to the local GNOME Shell extensions directory. Copying the whole of
 # src/ means a new module never has to be registered anywhere. If it is in
 # src/, it ships.
+#
+# The old copy is deleted first, never copied over. A running Shell keeps
+# schemas/gschemas.compiled memory-mapped; rewriting those bytes under the
+# same inode changes what the live mapping reads, and a GSettings lookup that
+# then fails takes the session down with it. Unlinking leaves the old inode
+# alive for anything still mapping it. This replaces the directory wholesale,
+# so files dropped from src/ are cleaned out rather than left behind. The
+# trailing slash is stripped because `rm -rf link/` empties a symlinked
+# install's target instead of removing the link.
 install: build
-	@mkdir -p $(EXTENSION_DIR)
-	@cp -r $(SRC_DIR)/* $(EXTENSION_DIR)/
-	@echo "Installed to $(EXTENSION_DIR)"
+	@ext='$(EXTENSION_DIR)'; ext=$${ext%/}; \
+	[ -n "$$ext" ] || { echo "install: EXTENSION_DIR must not be empty" >&2; exit 1; }; \
+	rm -rf "$$ext" && mkdir -p "$$ext" && cp -r "$(SRC_DIR)"/* "$$ext"/ && \
+	echo "Installed to $$ext"
 	@# A dev copy from `make reload` would otherwise stay enabled across
 	@# logins with the production copy switched off; installing means we
 	@# are done iterating.
@@ -110,6 +120,7 @@ check:
 # usage.json.
 test:
 	@gjs -m tests/run.js
+	@tests/install.sh
 
 lint:
 	@if command -v eslint >/dev/null 2>&1; then \
