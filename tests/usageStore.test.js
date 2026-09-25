@@ -3,7 +3,7 @@ import Gio from 'gi://Gio';
 import { test, assertEqual } from './harness.js';
 import { FakeSettings } from './fakeSettings.js';
 import {
-    UsageStore, STORE_FILE, todayKey, dateKey, knownAppsFromData,
+    UsageStore, STORE_FILE, todayKey, todayKeyFor, dateKey, knownAppsFromData,
 } from '../src/usageStore.js';
 
 function daysAgoKey(days) {
@@ -263,4 +263,50 @@ test('load: zero-second rows written by older versions are swept out', async () 
     assertEqual(store.getOldestDate(), todayKey(),
         'a day left with nothing in it is dropped too');
     store.destroy();
+});
+
+// The day boundary. dateKey() takes the hour and subtracts it before reading
+// the date, so DST is GLib's problem: NZ's spring-forward day is 23 hours long
+// and its fall-back day 25, and neither should move a night's work.
+const at = (y, m, d, h, min) => GLib.DateTime.new_local(y, m, d, h, min, 0);
+
+test('dateKey: hour 0 is the plain calendar day', () => {
+    assertEqual(dateKey(at(2026, 9, 24, 1, 30), 0), '2026-09-24');
+    assertEqual(dateKey(at(2026, 9, 24, 1, 30)), '2026-09-24', 'and is the default');
+});
+
+test('dateKey: before the boundary belongs to the day before', () => {
+    assertEqual(dateKey(at(2026, 9, 24, 1, 30), 4), '2026-09-23');
+    assertEqual(dateKey(at(2026, 9, 24, 3, 59), 4), '2026-09-23');
+});
+
+test('dateKey: the boundary hour starts the new day', () => {
+    assertEqual(dateKey(at(2026, 9, 24, 4, 0), 4), '2026-09-24');
+    assertEqual(dateKey(at(2026, 9, 24, 12, 0), 4), '2026-09-24');
+    assertEqual(dateKey(at(2026, 9, 24, 23, 59), 4), '2026-09-24');
+});
+
+test('dateKey: a 23-hour day (DST spring forward) keeps its night', () => {
+    assertEqual(dateKey(at(2026, 9, 27, 1, 30), 4), '2026-09-26');
+    assertEqual(dateKey(at(2026, 9, 27, 5, 0), 4), '2026-09-27');
+});
+
+test('dateKey: a 25-hour day (DST fall back) keeps its night', () => {
+    assertEqual(dateKey(at(2026, 4, 5, 1, 30), 4), '2026-04-04');
+    assertEqual(dateKey(at(2026, 4, 5, 6, 0), 4), '2026-04-05');
+});
+
+test('todayKeyFor: reads the boundary out of settings', () => {
+    let settings = new FakeSettings({ 'day-start-hour': 0 });
+    assertEqual(todayKeyFor(settings), todayKey(0));
+    settings.set_int('day-start-hour', 23);
+    assertEqual(todayKeyFor(settings), todayKey(23));
+});
+
+test('a day key shifted by whole days is never offset again', () => {
+    // shiftKey() in the popup walks between keys that are already logical
+    // days; running those back through the boundary would move every one.
+    let key = dateKey(at(2026, 9, 24, 1, 30), 4);
+    let [y, m, d] = key.split('-').map(Number);
+    assertEqual(dateKey(GLib.DateTime.new_local(y, m, d, 0, 0, 0)), key);
 });
