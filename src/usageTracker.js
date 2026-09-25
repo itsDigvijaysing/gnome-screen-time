@@ -102,7 +102,10 @@ export class UsageTracker {
 
     // No input for the whole timeout. Something inhibiting idle (a video, a
     // presentation) means the user is still watching, so keep counting and
-    // look again in a minute; otherwise stop until the next input.
+    // look again in a minute; otherwise stop until the next input. Observed
+    // on GNOME 50 Wayland: Mutter already withholds idle watches while idle
+    // is inhibited, so this check rarely runs there; it stays as the
+    // backstop for sessions where it does not.
     _onIdle() {
         if (this._idle)
             return;
@@ -195,11 +198,31 @@ export class UsageTracker {
     }
 
     // Credits elapsed time (since _lastTime) to whatever app is currently
-    // tracked. Callers are responsible for updating _lastTime afterward.
+    // tracked and advances the clock. The store keeps whole seconds, so the
+    // fraction it rounds away is left on the clock instead of being dropped:
+    // short flushes (quick focus changes) then neither lose time nor inflate
+    // it.
     _flush(now) {
-        let secs = Math.min((now - this._lastTime) / 1000, this._getMaxInterval());
-        if (this._appId && secs > 0)
-            this._store.addTime(this._appId, this._appName, secs);
+        let elapsed = (now - this._lastTime) / 1000;
+        let secs = Math.min(elapsed, this._getMaxInterval());
+        if (!this._appId) {
+            this._lastTime = now;
+            return;
+        }
+        if (secs <= 0) {
+            // In debt from a previous round-up: leave the clock so the debt
+            // is repaid by the next flush. A whole negative second cannot
+            // come from rounding, so that is a clock jump: resynchronise.
+            if (secs <= -1)
+                this._lastTime = now;
+            return;
+        }
+        let credited = Math.round(secs);
+        if (credited > 0)
+            this._store.addTime(this._appId, this._appName, credited);
+        // When max-interval capped the stretch, the excess is discarded on
+        // purpose (that is what the setting is for), so no residual.
+        this._lastTime = secs < elapsed ? now : now - (secs - credited) * 1000;
     }
 
     // Going away banks the time so far and stops tracking; coming back re-reads
@@ -207,16 +230,12 @@ export class UsageTracker {
     _setAway(away) {
         let now = Date.now();
         this._away = away;
-        if (away) {
-            this._flush(now);
-            this._appId = null;
-            this._appName = null;
-        } else {
-            let app = this._currentApp();
-            this._appId = app?.id ?? null;
-            this._appName = app?.name ?? null;
-        }
-        this._lastTime = now;
+        // Going away, this banks the tracked time; coming back, _appId is
+        // already null, so it only resets the clock for the app picked up next.
+        this._flush(now);
+        let app = away ? null : this._currentApp();
+        this._appId = app?.id ?? null;
+        this._appName = app?.name ?? null;
     }
 
     _onPresenceChanged() {
@@ -243,15 +262,11 @@ export class UsageTracker {
         let app = this._currentApp();
         this._appId = app?.id ?? null;
         this._appName = app?.name ?? null;
-        this._lastTime = now;
     }
 
     _onFlushTick() {
-        if (!this._away && this._appId) {
-            let now = Date.now();
-            this._flush(now);
-            this._lastTime = now;
-        }
+        if (!this._away && this._appId)
+            this._flush(Date.now());
         return GLib.SOURCE_CONTINUE;
     }
 
