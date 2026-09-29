@@ -4,6 +4,7 @@ import Adw from 'gi://Adw';
 import GLib from 'gi://GLib';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 import { STORE_FILE, knownAppsFromData, dateKey } from './usageStore.js';
+import { getAppNames } from './appNames.js';
 import { formatTime } from './formatTime.js';
 import { getAppLimits, setAppLimit, removeAppLimit } from './appLimits.js';
 
@@ -252,7 +253,7 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
         page.add(limitsGroup);
 
         // Only apps you've actually used can be picked, not a full system app scan.
-        const knownApps = knownAppsFromData(data);
+        const knownApps = knownAppsFromData(data, getAppNames(settings));
         const appIds = [...knownApps.keys()].sort(
             (a, b) => knownApps.get(a).localeCompare(knownApps.get(b)));
 

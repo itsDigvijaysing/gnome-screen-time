@@ -1,5 +1,6 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
+import { getAppNames } from './appNames.js';
 
 Gio._promisify(Gio.File.prototype, 'load_contents_async', 'load_contents_finish');
 
@@ -31,11 +32,13 @@ export function todayKeyFor(settings) {
 // appId -> displayName for every app in `data`, shared by UsageStore and
 // prefs.js so both pick from the same set. Skips "Unknown", Shell's fallback
 // name for windows it can't identify.
-export function knownAppsFromData(data) {
+export function knownAppsFromData(data, names = {}) {
     let known = new Map();
     for (let day of Object.values(data)) {
         for (let [appId, info] of Object.entries(day)) {
-            if (info.displayName !== 'Unknown')
+            if (names[appId])
+                known.set(appId, names[appId]);
+            else if (info.displayName !== 'Unknown')
                 known.set(appId, info.displayName);
         }
     }
@@ -205,7 +208,40 @@ export class UsageStore {
         this._data[today][appId].seconds += secs;
         this._data[today][appId].displayName = displayName;
         this._dirty = true;
-        this.onChange?.(appId, displayName, this._data[today][appId].seconds);
+        this.onChange?.(appId, this._nameFor(appId, displayName),
+            this._data[today][appId].seconds);
+    }
+
+    // Removes one app's entry from one day, returning it so it can be put
+    // back with restoreEntry(), or null if there was none. A day left empty
+    // goes too.
+    deleteEntry(dateKey, appId) {
+        let day = this._data[dateKey];
+        let entry = day?.[appId];
+        if (!entry)
+            return null;
+        delete day[appId];
+        if (Object.keys(day).length === 0)
+            delete this._data[dateKey];
+        this._dirty = true;
+        this.onChange?.();
+        return { ...entry };
+    }
+
+    // Undoes deleteEntry(). Time tracked for the app since the delete is
+    // added to, not overwritten, so nothing recorded in between is lost.
+    restoreEntry(dateKey, appId, entry) {
+        this._data[dateKey] ??= {};
+        let day = this._data[dateKey];
+        let seconds = entry.seconds + (day[appId]?.seconds ?? 0);
+        day[appId] = { ...entry, seconds };
+        this._dirty = true;
+        this.onChange?.();
+    }
+
+    // An app's name as shown: the user's rename if any, else the tracked one.
+    _nameFor(appId, trackedName) {
+        return getAppNames(this._settings)[appId] || trackedName;
     }
 
     getTodayTotal() {
@@ -213,15 +249,18 @@ export class UsageStore {
     }
 
     // Per-app usage for one day, biggest first, unfiltered. Callers decide
-    // what's worth showing.
+    // what's worth showing. `trackedName` is the Shell's name, which
+    // `displayName` differs from when the app was renamed.
     getUsageForDate(dateKey) {
         let day = this._data[dateKey];
         if (!day)
             return [];
+        let names = getAppNames(this._settings);
         return Object.entries(day)
             .map(([appId, info]) => ({
                 appId,
-                displayName: info.displayName,
+                displayName: names[appId] || info.displayName,
+                trackedName: info.displayName,
                 seconds: info.seconds,
             }))
             .sort((a, b) => b.seconds - a.seconds);
@@ -243,7 +282,7 @@ export class UsageStore {
     }
 
     getKnownApps() {
-        return knownAppsFromData(this._data);
+        return knownAppsFromData(this._data, getAppNames(this._settings));
     }
 
     destroy() {

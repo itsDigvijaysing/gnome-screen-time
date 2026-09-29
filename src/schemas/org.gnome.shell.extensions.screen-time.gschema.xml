@@ -36,6 +36,11 @@
       <summary>Show today's total in the panel</summary>
       <description>When enabled the panel shows the icon plus today's total screen time; when disabled only the icon is shown.</description>
     </key>
+    <key name="app-names" type="a{ss}">
+      <default>{}</default>
+      <summary>Renamed apps</summary>
+      <description>Maps an application id to the name shown for it in place of the one the Shell reports. Tracking stays keyed on the id, so renaming never splits an app's history.</description>
+    </key>
     <key name="app-limits" type="a{si}">
       <default>{}</default>
       <summary>Per-app daily time limits</summary>

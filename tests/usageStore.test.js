@@ -5,6 +5,7 @@ import { FakeSettings } from './fakeSettings.js';
 import {
     UsageStore, STORE_FILE, todayKey, dateKey, knownAppsFromData,
 } from '../src/usageStore.js';
+import { setAppName } from '../src/appNames.js';
 
 function daysAgoKey(days) {
     return dateKey(GLib.DateTime.new_now_local().add_days(-days));
@@ -54,7 +55,7 @@ test('addTime: accumulates per app and reports the running total', async () => {
     store.addTime('a.desktop', 'A', 10);
     store.addTime('a.desktop', 'A', 5);
     assertEqual(store.getUsageForDate(todayKey()),
-        [{ appId: 'a.desktop', displayName: 'A', seconds: 15 }]);
+        [{ appId: 'a.desktop', displayName: 'A', trackedName: 'A', seconds: 15 }]);
     assertEqual(calls, [['a.desktop', 'A', 10], ['a.desktop', 'A', 15]]);
     store.destroy();
 });
@@ -72,7 +73,7 @@ test('addTime: a renamed app keeps its time under the same id', async () => {
     store.addTime('a.desktop', 'Old Name', 10);
     store.addTime('a.desktop', 'New Name', 10);
     assertEqual(store.getUsageForDate(todayKey()),
-        [{ appId: 'a.desktop', displayName: 'New Name', seconds: 20 }]);
+        [{ appId: 'a.desktop', displayName: 'New Name', trackedName: 'New Name', seconds: 20 }]);
     store.destroy();
 });
 
@@ -202,9 +203,9 @@ test('load: time tracked before the read lands is added to it, not lost', async 
     await loaded;
 
     assertEqual(store.getUsageForDate(todayKey()), [
-        { appId: 'a.desktop', displayName: 'A', seconds: 65 },
-        { appId: 'b.desktop', displayName: 'B', seconds: 60 },
-        { appId: 'c.desktop', displayName: 'C', seconds: 5 },
+        { appId: 'a.desktop', displayName: 'A', trackedName: 'A', seconds: 65 },
+        { appId: 'b.desktop', displayName: 'B', trackedName: 'B', seconds: 60 },
+        { appId: 'c.desktop', displayName: 'C', trackedName: 'C', seconds: 5 },
     ]);
     store.destroy();
 });
@@ -258,9 +259,82 @@ test('load: zero-second rows written by older versions are swept out', async () 
     });
 
     assertEqual(store.getUsageForDate(todayKey()),
-        [{ appId: 'a.desktop', displayName: 'A', seconds: 60 }]);
+        [{ appId: 'a.desktop', displayName: 'A', trackedName: 'A', seconds: 60 }]);
     assertEqual(store.getTotalForDate(todayKey()), 60, 'no total moves');
     assertEqual(store.getOldestDate(), todayKey(),
         'a day left with nothing in it is dropped too');
     store.destroy();
+});
+
+test('deleteEntry: removes one app from one day and hands it back', async () => {
+    let today = todayKey();
+    writeStoreFile({ [today]: {
+        'a.desktop': { displayName: 'A', seconds: 600 },
+        'b.desktop': { displayName: 'B', seconds: 300 },
+    } });
+    let store = new UsageStore(new FakeSettings());
+    await whenLoaded(store);
+    let removed = store.deleteEntry(today, 'a.desktop');
+    assertEqual(removed, { displayName: 'A', seconds: 600 });
+    assertEqual(store.getUsageForDate(today).map(a => a.appId), ['b.desktop']);
+    assertEqual(store.getTotalForDate(today), 300);
+    assertEqual(store.deleteEntry(today, 'a.desktop'), null, 'already gone');
+    store.destroy();
+});
+
+test('deleteEntry: a day left empty goes too', async () => {
+    let day = daysAgoKey(1);
+    writeStoreFile({ [day]: { 'a.desktop': { displayName: 'A', seconds: 60 } } });
+    let store = new UsageStore(new FakeSettings());
+    await whenLoaded(store);
+    store.deleteEntry(day, 'a.desktop');
+    store._save();
+    assertEqual(day in readStoreFile(), false);
+    store.destroy();
+});
+
+test('restoreEntry: puts a deleted entry back exactly', async () => {
+    let today = todayKey();
+    writeStoreFile({ [today]: { 'a.desktop': { displayName: 'A', seconds: 600 } } });
+    let store = new UsageStore(new FakeSettings());
+    await whenLoaded(store);
+    let removed = store.deleteEntry(today, 'a.desktop');
+    store.restoreEntry(today, 'a.desktop', removed);
+    assertEqual(store.getUsageForDate(today),
+        [{ appId: 'a.desktop', displayName: 'A', trackedName: 'A', seconds: 600 }]);
+    store.destroy();
+});
+
+test('restoreEntry: time tracked since the delete is kept, not overwritten', async () => {
+    let today = todayKey();
+    writeStoreFile({});
+    let store = new UsageStore(new FakeSettings());
+    await whenLoaded(store);
+    store.addTime('a.desktop', 'A', 600);
+    let removed = store.deleteEntry(today, 'a.desktop');
+    store.addTime('a.desktop', 'A', 30);
+    store.restoreEntry(today, 'a.desktop', removed);
+    assertEqual(store.getTotalForDate(today), 630);
+    store.destroy();
+});
+
+test('app-names: a rename shows everywhere, and clearing it restores the tracked name', async () => {
+    let today = todayKey();
+    writeStoreFile({ [today]: { 'wmclass:foo': { displayName: 'foo', seconds: 60 } } });
+    let settings = new FakeSettings();
+    let store = new UsageStore(settings);
+    await whenLoaded(store);
+    setAppName(settings, 'wmclass:foo', 'Foo Editor');
+    let [row] = store.getUsageForDate(today);
+    assertEqual([row.displayName, row.trackedName], ['Foo Editor', 'foo']);
+    assertEqual(store.getKnownApps().get('wmclass:foo'), 'Foo Editor');
+    setAppName(settings, 'wmclass:foo', '');
+    assertEqual(store.getUsageForDate(today)[0].displayName, 'foo');
+    store.destroy();
+});
+
+test('knownAppsFromData: a renamed Unknown is listed under its new name', () => {
+    let data = { '2026-09-28': { 'window:1': { displayName: 'Unknown', seconds: 5 } } };
+    assertEqual([...knownAppsFromData(data).keys()], []);
+    assertEqual([...knownAppsFromData(data, { 'window:1': 'Thing' })], [['window:1', 'Thing']]);
 });

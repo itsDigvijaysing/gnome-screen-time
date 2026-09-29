@@ -6,7 +6,10 @@ import GLib from 'gi://GLib';
 export class FakeSettings {
     constructor(ints = {}, appLimits = {}) {
         this._ints = { 'retention-days': 90, 'max-interval': 300, 'purge-requested': 0, ...ints };
-        this._values = { 'app-limits': new GLib.Variant('a{si}', appLimits) };
+        this._values = {
+            'app-limits': new GLib.Variant('a{si}', appLimits),
+            'app-names': new GLib.Variant('a{ss}', {}),
+        };
         this._handlers = new Map();
         this._nextId = 1;
     }

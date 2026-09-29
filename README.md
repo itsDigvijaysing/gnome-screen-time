@@ -12,6 +12,7 @@ The panel shows today's total at a glance. Click it for a per-app breakdown, and
 - **Per-app breakdown:** top five apps with usage bars and percentages; everything else folds into a collapsible "Other N apps" row, so the numbers always add up to the total.
 - **Day-by-day history:** `‹ Today ›` steps back one day at a time.
 - **App time limits:** set a daily limit per app and get a desktop notification once you cross it.
+- **Tidy up:** the pen beside an app's bar renames it (on every day) or deletes that day's entry, with an undo until the popup closes.
 - **7-day chart** in preferences, with configurable retention and a one-click purge.
 - **Presence-aware:** time on the lock screen, while the screen is blanked, or while suspended is never counted.
 - **Local only:** a plain JSON file on your disk. No network access, no telemetry.
