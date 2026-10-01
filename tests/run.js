@@ -14,6 +14,7 @@ const FILES = [
     './formatTime.test.js',
     './appLimits.test.js',
     './usageStore.test.js',
+    './trackerClock.test.js',
 ];
 
 // Removes the scratch directory and everything UsageStore wrote inside it,
