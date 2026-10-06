@@ -10,12 +10,17 @@ import { ROW_W, BAR_W, DIM_OPACITY, makeUsageBar } from './usageBar.js';
 import { pauseUntil, pauseKind } from './pause.js';
 
 const MAX_VISIBLE = 5;
+// choice, label when starting a pause, label when one is already timed (the
+// choice then adds to the time left rather than replacing it). Kept short
+// because all four have to sit on one ROW_W-wide line.
 const PAUSE_CHOICES = [
-    ['30m', '+30m'], ['1h', '+1h'], ['tomorrow', 'Tomorrow'], ['manual', 'Manual'],
+    ['30m', '30 min', '+30 min'],
+    ['1h', '1 hour', '+1 hour'],
+    ['tomorrow', 'Tomorrow', 'Tomorrow'],
+    ['manual', 'No end', 'No end'],
 ];
 // Under this much left, the paused line adds how long remains.
 const SOON_SECONDS = 30 * 60;
-const ACTIVE_STYLE = 'background-color: rgba(128,128,128,0.25);';
 
 function nowSeconds() {
     return Math.floor(Date.now() / 1000);
@@ -84,9 +89,25 @@ export class PopupWidget {
         // A pause can end, or be changed, while the popup is open: the
         // tracker clears one that lapses. Follow it rather than show a
         // pause that no longer holds.
-        this._pauseId = this._settings.connect('changed::paused-until', () => {
-            if (this._menu.isOpen)
+        this._pauseId = this._settings.connect('changed::paused-until',
+            () => this._rebuildSoon());
+    }
+
+    // _build() calls menu.removeAll(), which destroys every item in the menu,
+    // including the button whose `clicked` handler is still on the stack when
+    // a pause chip or the pause button writes the setting. Destroying an actor
+    // inside its own handler leaves Clutter's pointer grab pointing at a dead
+    // actor, and the *next* click is swallowed: pause, then resume does
+    // nothing until you click twice. Deferring to an idle lets the click
+    // finish before the tree is torn down.
+    _rebuildSoon() {
+        if (this._rebuildId)
+            return;
+        this._rebuildId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._rebuildId = 0;
+            if (this._menu?.isOpen)
                 this._build();
+            return GLib.SOURCE_REMOVE;
         });
     }
 
@@ -279,20 +300,26 @@ export class PopupWidget {
         this._settings.set_int64('paused-until', until);
     }
 
-    // Only while paused: what the pause is and how to change it. +30m and
-    // +1h add to a timed pause, so they are never lit; Tomorrow and Manual
-    // are states, lit while they hold. The card's play button resumes.
+    // Only while paused. Row one says what is holding and offers the big
+    // Resume target; row two changes how long the pause runs. The card keeps
+    // its own small play button, but that icon is 12px, so Resume lives here
+    // too where it can be hit without aiming.
     _addPauseBlock() {
         let now = nowSeconds();
         let until = this._settings.get_int64('paused-until');
-        let kind = pauseKind(until, now, this._settings.get_int('day-start-hour'));
+        let startHour = this._settings.get_int('day-start-hour');
+        let kind = pauseKind(until, now, startHour);
         if (!kind)
             return;
 
         let item = new PopupMenu.PopupBaseMenuItem({activate: false});
         item.track_hover = false;
         item.style = 'padding: 0;';
-        let col = new St.BoxLayout({vertical: true, x_expand: true, style: 'padding: 6px 10px 0 10px;'});
+        let col = new St.BoxLayout({
+            vertical: true,
+            x_expand: true,
+            style: `padding: 8px 10px 4px 10px; width: ${ROW_W}px;`,
+        });
 
         let top = new St.BoxLayout();
         top.add_child(new St.Icon({
@@ -300,32 +327,40 @@ export class PopupWidget {
             icon_size: 14,
             y_align: Clutter.ActorAlign.CENTER,
         }));
-        let when = kind === 'manual' ? 'resumed' : kind === 'tomorrow' ? 'tomorrow' : null;
-        if (when === null) {
-            // A pause can run up to a day, so an end on a later calendar
-            // day says so rather than passing for a time later today.
-            let end = GLib.DateTime.new_from_unix_local(until);
-            let sameDay = end.format('%F') === GLib.DateTime.new_from_unix_local(now).format('%F');
-            when = (sameDay ? '' : 'tomorrow ') + DateUtils.formatTime(end, {timeOnly: true});
-        }
-        // Close to the end, how long is left reads quicker than the clock
-        // time. Rounded up, so the last minute says 1m rather than 0m.
-        if (kind === 'until' && until - now < SOON_SECONDS)
-            when += ` (in ${formatTime(Math.ceil((until - now) / 60) * 60)})`;
         top.add_child(new St.Label({
-            text: `Screen Time paused until ${when}`,
+            text: `Paused ${this._pauseEndsText(kind, until, now)}`,
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
-            style: 'font-size: 12px; padding-left: 6px;',
+            style: 'font-size: 12px; font-weight: 600; padding-left: 6px;',
         }));
+        let resume = new St.Button({
+            label: 'Resume',
+            style_class: 'screen-time-chip screen-time-chip-suggested',
+            can_focus: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        resume.connect('clicked', () => this._setPause(null));
+        top.add_child(resume);
         col.add_child(top);
 
-        let chips = new St.BoxLayout({style: 'spacing: 4px; padding-top: 4px;'});
-        for (let [choice, label] of PAUSE_CHOICES) {
+        // Without this the four chips below are unexplained: "+30m" says
+        // nothing about what it adds to.
+        col.add_child(new St.Label({
+            text: kind === 'until' ? 'Extend or change' : 'Or pause for',
+            opacity: DIM_OPACITY,
+            style: 'font-size: 10px; padding: 6px 0 3px 0;',
+        }));
+
+        let chips = new St.BoxLayout({style: 'spacing: 3px;'});
+        for (let [choice, label, addLabel] of PAUSE_CHOICES) {
+            // 'until' is the only state where a timed choice adds rather than
+            // replaces, so it is the only one that gets the "+" label.
+            let active = choice === kind;
             let chip = new St.Button({
-                label,
-                style_class: 'screen-time-nav-button',
-                style: 'font-size: 11px;' + (choice === kind ? ACTIVE_STYLE : ''),
+                label: kind === 'until' ? addLabel : label,
+                style_class: active
+                    ? 'screen-time-chip screen-time-chip-active'
+                    : 'screen-time-chip',
                 can_focus: true,
             });
             chip.connect('clicked', () => this._setPause(choice));
@@ -335,6 +370,23 @@ export class PopupWidget {
 
         item.add_child(col);
         this._menu.addMenuItem(item);
+    }
+
+    // "until you resume", "until tomorrow", or a clock time, with how long is
+    // left once the end is close enough that the clock time stops helping.
+    _pauseEndsText(kind, until, now) {
+        if (kind === 'manual')
+            return 'until you resume';
+        if (kind === 'tomorrow')
+            return 'until tomorrow';
+        let end = GLib.DateTime.new_from_unix_local(until);
+        let sameDay = end.format('%F') === GLib.DateTime.new_from_unix_local(now).format('%F');
+        let text = `until ${sameDay ? '' : 'tomorrow '}` +
+            DateUtils.formatTime(end, {timeOnly: true});
+        // Rounded up, so the last minute reads 1m rather than 0m.
+        if (until - now < SOON_SECONDS)
+            text += `, ${formatTime(Math.ceil((until - now) / 60) * 60)} left`;
+        return text;
     }
 
     _addAppRow(app, total, color) {
@@ -463,6 +515,10 @@ export class PopupWidget {
         if (this._pauseId) {
             this._settings.disconnect(this._pauseId);
             this._pauseId = null;
+        }
+        if (this._rebuildId) {
+            GLib.source_remove(this._rebuildId);
+            this._rebuildId = 0;
         }
         this._menu = null;
         this._store = null;

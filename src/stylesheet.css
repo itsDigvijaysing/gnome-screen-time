@@ -39,3 +39,48 @@
 .screen-time-card-button:active {
     background-color: rgba(0, 0, 0, 0.22);
 }
+
+/* Pause chips. The active one is a class, never an inline background: inline
+ * style outranks the stylesheet, so an inline background would silently kill
+ * this rule's :hover and the selected chip would be the one chip in the popup
+ * that does not react to the pointer. */
+.screen-time-chip {
+    padding: 3px 6px;
+    border-radius: 99px;
+    font-size: 10px;
+    border: 1px solid rgba(128, 128, 128, 0.3);
+    transition-duration: 150ms;
+}
+
+.screen-time-chip:hover {
+    background-color: rgba(128, 128, 128, 0.25);
+    border-color: rgba(128, 128, 128, 0.5);
+}
+
+.screen-time-chip:active {
+    background-color: rgba(128, 128, 128, 0.45);
+}
+
+.screen-time-chip:focus {
+    border-color: rgba(128, 128, 128, 0.75);
+}
+
+.screen-time-chip-active {
+    background-color: rgba(128, 128, 128, 0.3);
+    border-color: rgba(128, 128, 128, 0.55);
+    font-weight: 700;
+}
+
+.screen-time-chip-active:hover {
+    background-color: rgba(128, 128, 128, 0.42);
+}
+
+/* Resume is the one action in the pause block worth leading with. */
+.screen-time-chip-suggested {
+    font-weight: 700;
+    background-color: rgba(128, 128, 128, 0.22);
+}
+
+.screen-time-chip-suggested:hover {
+    background-color: rgba(128, 128, 128, 0.38);
+}
