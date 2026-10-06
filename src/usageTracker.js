@@ -3,6 +3,7 @@ import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as LoginManager from 'resource:///org/gnome/shell/misc/loginManager.js';
+import { isPaused } from './pause.js';
 import { advanceClock } from './trackerClock.js';
 
 // Periodic flush so a long unbroken session still updates the total/limit
@@ -32,6 +33,10 @@ export class UsageTracker {
         this._idleWatchId = 0;
         this._activeWatchId = 0;
         this._idleRecheckId = 0;
+        // Set while the user has paused tracking from the popup; a timed
+        // pause clears the setting itself when it lapses.
+        this._paused = false;
+        this._pauseTimeoutId = 0;
         // Cancels the inhibit query still in flight when the extension stops.
         this._cancellable = new Gio.Cancellable();
         this._away = this._computeAway();
@@ -64,6 +69,9 @@ export class UsageTracker {
         this._armIdleWatch();
         this._idleSettingId = this._settings.connect(
             'changed::idle-timeout', () => this._armIdleWatch());
+        this._pauseSettingId = this._settings.connect(
+            'changed::paused-until', () => this._syncPause());
+        this._syncPause();
 
         // enable() runs at login and again after every unlock, where the window
         // that is already focused fires no focus change of its own. Sync once
@@ -171,8 +179,35 @@ export class UsageTracker {
         return this._settings.get_int('max-interval');
     }
 
+    // Reads `paused-until` and goes away or comes back to match. The timeout
+    // that ends a timed pause does not count suspended time, so resuming from
+    // sleep and every enable() re-run this to catch a pause that lapsed.
+    _syncPause() {
+        if (this._pauseTimeoutId) {
+            GLib.source_remove(this._pauseTimeoutId);
+            this._pauseTimeoutId = 0;
+        }
+        let until = this._settings.get_int64('paused-until');
+        let now = Math.floor(Date.now() / 1000);
+        if (until > 0 && until <= now) {
+            // Lapsed: clearing it re-enters here through the changed signal.
+            this._settings.set_int64('paused-until', 0);
+            return;
+        }
+        this._paused = isPaused(until, now);
+        if (until > 0) {
+            this._pauseTimeoutId = GLib.timeout_add_seconds(
+                GLib.PRIORITY_DEFAULT, until - now, () => {
+                    this._pauseTimeoutId = 0;
+                    this._settings.set_int64('paused-until', 0);
+                    return GLib.SOURCE_REMOVE;
+                });
+        }
+        this._onPresenceChanged();
+    }
+
     _computeAway() {
-        return this._idle ||
+        return this._idle || this._paused ||
             !!(this._shield && (this._shield.active || this._shield.locked));
     }
 
@@ -235,9 +270,12 @@ export class UsageTracker {
     }
 
     _onPrepareForSleep(aboutToSuspend) {
-        if (aboutToSuspend)
+        if (aboutToSuspend) {
             this._setAway(true);
-        else if (!this._computeAway())
+            return;
+        }
+        this._syncPause();
+        if (!this._computeAway())
             this._setAway(false);   // resumed straight to the desktop
         // Otherwise the shield is up: stay away until it clears.
     }
@@ -284,6 +322,14 @@ export class UsageTracker {
         if (this._idleSettingId) {
             this._settings.disconnect(this._idleSettingId);
             this._idleSettingId = null;
+        }
+        if (this._pauseSettingId) {
+            this._settings.disconnect(this._pauseSettingId);
+            this._pauseSettingId = null;
+        }
+        if (this._pauseTimeoutId) {
+            GLib.source_remove(this._pauseTimeoutId);
+            this._pauseTimeoutId = 0;
         }
         // Watches first: clearing _activeWatchId is what makes a late reply to
         // the cancelled inhibit query bail out instead of marking us idle.

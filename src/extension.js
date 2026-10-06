@@ -4,6 +4,7 @@ import { PopupWidget } from './popupWidget.js';
 import { UsageTracker } from './usageTracker.js';
 import { UsageStore } from './usageStore.js';
 import { LimitNotifier } from './limitNotifier.js';
+import { isPaused } from './pause.js';
 
 export default class ScreenTimeExtension extends Extension {
     enable() {
@@ -25,8 +26,10 @@ export default class ScreenTimeExtension extends Extension {
         this._indicator.setTotal(this._store.getTodayTotal());
 
         this._settings.connectObject(
-            'changed::show-total-in-panel', () => this._syncPanelLabel(), this);
+            'changed::show-total-in-panel', () => this._syncPanelLabel(), this,
+            'changed::paused-until', () => this._syncPaused(), this);
         this._syncPanelLabel();
+        this._syncPaused();
     }
 
     // The Shell refuses a second preferences dialog while one is showing, so
@@ -46,6 +49,12 @@ export default class ScreenTimeExtension extends Extension {
     _syncPanelLabel() {
         this._indicator.setShowTotal(
             this._settings.get_boolean('show-total-in-panel'));
+    }
+
+    // The tracker clears a lapsed pause, so this only has to mirror the key.
+    _syncPaused() {
+        this._indicator.setPaused(isPaused(
+            this._settings.get_int64('paused-until'), Math.floor(Date.now() / 1000)));
     }
 
     disable() {

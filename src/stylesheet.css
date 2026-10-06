@@ -23,3 +23,19 @@
 .screen-time-card {
     transition-duration: 150ms;
 }
+
+/* The total card's pause and play button. The card is always a light
+ * gradient, so this darkens rather than using the theme-neutral gray above. */
+.screen-time-card-button {
+    padding: 3px;
+    border-radius: 99px;
+    transition-duration: 150ms;
+}
+
+.screen-time-card-button:hover {
+    background-color: rgba(0, 0, 0, 0.12);
+}
+
+.screen-time-card-button:active {
+    background-color: rgba(0, 0, 0, 0.22);
+}

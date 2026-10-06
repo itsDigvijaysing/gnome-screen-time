@@ -26,6 +26,11 @@
       <summary>Hour a new day begins</summary>
       <description>Time tracked before this hour counts towards the previous day, so work that runs past midnight stays on the day it started. 0 is midnight, the plain calendar day.</description>
     </key>
+    <key name="paused-until" type="x">
+      <default>0</default>
+      <summary>Tracking paused until</summary>
+      <description>Internal, set from the popup. 0 means tracking is running, -1 means it is paused until resumed, and any other value is the unix time the pause ends.</description>
+    </key>
     <key name="purge-requested" type="i">
       <default>0</default>
       <summary>Manual purge trigger</summary>

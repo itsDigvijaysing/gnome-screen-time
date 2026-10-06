@@ -2,12 +2,24 @@ import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as DateUtils from 'resource:///org/gnome/shell/misc/dateUtils.js';
 import { formatTime } from './formatTime.js';
 import { todayKey, todayKeyFor, dateKey } from './usageStore.js';
 import { AppTimerSection } from './appTimerSection.js';
 import { ROW_W, BAR_W, DIM_OPACITY, makeUsageBar } from './usageBar.js';
+import { pauseUntil, pauseKind } from './pause.js';
 
 const MAX_VISIBLE = 5;
+const PAUSE_CHOICES = [
+    ['30m', '+30m'], ['1h', '+1h'], ['tomorrow', 'Tomorrow'], ['manual', 'Manual'],
+];
+// Under this much left, the paused line adds how long remains.
+const SOON_SECONDS = 30 * 60;
+const ACTIVE_STYLE = 'background-color: rgba(128,128,128,0.25);';
+
+function nowSeconds() {
+    return Math.floor(Date.now() / 1000);
+}
 const MIN_ROW_SECONDS = 60;
 const COLORS = ['#3584e4', '#33d17a', '#e5a50a', '#9141ac', '#ed333b'];
 
@@ -20,6 +32,9 @@ const USAGE_TIERS = [
     {limit: 5 * 3600, from: '#99c1f1', to: '#62a0ea', hoverFrom: '#bfd8f7', hoverTo: '#99c1f1'},
     {limit: Infinity, from: '#ffbdb6', to: '#f66151', hoverFrom: '#ffd6d1', hoverTo: '#ffbdb6'},
 ];
+
+// Grey while tracking is paused, whatever the usage: not counting.
+const PAUSED_TIER = {from: '#deddda', to: '#c0bfbc', hoverFrom: '#f6f5f4', hoverTo: '#deddda'};
 
 function tierFor(seconds) {
     return USAGE_TIERS.find(t => seconds < t.limit) ?? USAGE_TIERS.at(-1);
@@ -66,6 +81,13 @@ export class PopupWidget {
         this._openId = this._menu.connect('open-state-changed', (m, open) => {
             if (open) this._refresh();
         });
+        // A pause can end, or be changed, while the popup is open: the
+        // tracker clears one that lapses. Follow it rather than show a
+        // pause that no longer holds.
+        this._pauseId = this._settings.connect('changed::paused-until', () => {
+            if (this._menu.isOpen)
+                this._build();
+        });
     }
 
     _refresh() {
@@ -92,6 +114,7 @@ export class PopupWidget {
 
         this._addDateNav();
         this._addTotalCard(total);
+        this._addPauseBlock();
         this._addSeparator();
 
         if (all.length === 0) {
@@ -188,7 +211,11 @@ export class PopupWidget {
         item.track_hover = false;
         item.style = 'padding: 0;';
 
-        let tier = tierFor(total);
+        // A pause is about now, so only today's card shows it.
+        let isToday = this._date === todayKeyFor(this._settings);
+        let paused = isToday && pauseKind(this._settings.get_int64('paused-until'),
+            nowSeconds(), this._settings.get_int('day-start-hour')) !== null;
+        let tier = paused ? PAUSED_TIER : tierFor(total);
         let card = new St.BoxLayout({
             x_expand: true,
             reactive: true,
@@ -208,6 +235,10 @@ export class PopupWidget {
             y_align: Clutter.ActorAlign.CENTER,
             style: 'font-size: 17px; font-weight: 800; color: ' + CARD_FG + ';',
         }));
+        // Pause and resume, on today only: a pause is about now, not about
+        // the day being looked at.
+        if (isToday)
+            card.add_child(this._pauseButton());
 
         // The gradient is per-usage and therefore inline, which outranks any
         // stylesheet :hover rule, so the hover swap is done here instead.
@@ -216,6 +247,93 @@ export class PopupWidget {
         });
 
         item.add_child(card);
+        this._menu.addMenuItem(item);
+    }
+
+    // Pause while tracking, play while paused. Pausing starts open-ended;
+    // the chips under the card then set a length.
+    _pauseButton() {
+        let paused = pauseKind(this._settings.get_int64('paused-until'), nowSeconds(),
+            this._settings.get_int('day-start-hour')) !== null;
+        let btn = new St.Button({
+            child: new St.Icon({
+                icon_name: paused ? 'media-playback-start-symbolic' : 'media-playback-pause-symbolic',
+                icon_size: 12,
+                style: `color: ${CARD_FG};`,
+            }),
+            can_focus: true,
+            accessible_name: paused ? 'Resume tracking' : 'Pause tracking',
+            y_align: Clutter.ActorAlign.CENTER,
+            style_class: 'screen-time-card-button',
+            style: 'margin-left: 6px;',
+        });
+        btn.connect('clicked', () => this._setPause(paused ? null : 'manual'));
+        return btn;
+    }
+
+    _setPause(choice) {
+        let until = choice === null ? 0 : pauseUntil(choice, nowSeconds(),
+            this._settings.get_int('day-start-hour'),
+            this._settings.get_int64('paused-until'));
+        // The write rebuilds the popup through the changed handler.
+        this._settings.set_int64('paused-until', until);
+    }
+
+    // Only while paused: what the pause is and how to change it. +30m and
+    // +1h add to a timed pause, so they are never lit; Tomorrow and Manual
+    // are states, lit while they hold. The card's play button resumes.
+    _addPauseBlock() {
+        let now = nowSeconds();
+        let until = this._settings.get_int64('paused-until');
+        let kind = pauseKind(until, now, this._settings.get_int('day-start-hour'));
+        if (!kind)
+            return;
+
+        let item = new PopupMenu.PopupBaseMenuItem({activate: false});
+        item.track_hover = false;
+        item.style = 'padding: 0;';
+        let col = new St.BoxLayout({vertical: true, x_expand: true, style: 'padding: 6px 10px 0 10px;'});
+
+        let top = new St.BoxLayout();
+        top.add_child(new St.Icon({
+            icon_name: 'media-playback-pause-symbolic',
+            icon_size: 14,
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+        let when = kind === 'manual' ? 'resumed' : kind === 'tomorrow' ? 'tomorrow' : null;
+        if (when === null) {
+            // A pause can run up to a day, so an end on a later calendar
+            // day says so rather than passing for a time later today.
+            let end = GLib.DateTime.new_from_unix_local(until);
+            let sameDay = end.format('%F') === GLib.DateTime.new_from_unix_local(now).format('%F');
+            when = (sameDay ? '' : 'tomorrow ') + DateUtils.formatTime(end, {timeOnly: true});
+        }
+        // Close to the end, how long is left reads quicker than the clock
+        // time. Rounded up, so the last minute says 1m rather than 0m.
+        if (kind === 'until' && until - now < SOON_SECONDS)
+            when += ` (in ${formatTime(Math.ceil((until - now) / 60) * 60)})`;
+        top.add_child(new St.Label({
+            text: `Screen Time paused until ${when}`,
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'font-size: 12px; padding-left: 6px;',
+        }));
+        col.add_child(top);
+
+        let chips = new St.BoxLayout({style: 'spacing: 4px; padding-top: 4px;'});
+        for (let [choice, label] of PAUSE_CHOICES) {
+            let chip = new St.Button({
+                label,
+                style_class: 'screen-time-nav-button',
+                style: 'font-size: 11px;' + (choice === kind ? ACTIVE_STYLE : ''),
+                can_focus: true,
+            });
+            chip.connect('clicked', () => this._setPause(choice));
+            chips.add_child(chip);
+        }
+        col.add_child(chips);
+
+        item.add_child(col);
         this._menu.addMenuItem(item);
     }
 
@@ -341,6 +459,10 @@ export class PopupWidget {
         if (this._openId) {
             this._menu.disconnect(this._openId);
             this._openId = null;
+        }
+        if (this._pauseId) {
+            this._settings.disconnect(this._pauseId);
+            this._pauseId = null;
         }
         this._menu = null;
         this._store = null;
