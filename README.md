@@ -53,12 +53,13 @@ gnome-extensions prefs screen-time@gnome-screen-time
 
 | Setting | Default | What it does |
 |---|---|---|
-| Show total time in panel | On | Off shows only the icon. |
+| Show today's total next to the icon | On | Off leaves just the icon in the top bar. The popup always shows the total. |
 | Max interval | 600s | Caps any single tracked stretch, so a stall can't dump hours onto one app. |
 | Idle timeout | 10 min | Stop counting after this long without input. `0` disables idle detection. |
 | Day starts at | 0 (midnight) | Hour a new day begins, so work past midnight can stay on the day it started. |
 | App time limits | none | Per-app daily limit in minutes; notifies once per day when crossed. |
 | Retention days | 90 | How long history is kept. `0` keeps it forever. |
+| History range | 7 days | The chart in preferences covers 7, 30 or 90 days, capped by what retention keeps. |
 
 ## How time is measured
 
@@ -66,7 +67,7 @@ Time is attributed to the app owning the **focused window**, updated on every fo
 
 - A video playing in an **unfocused** window is not counted: this measures interaction, not playback.
 - Tracking **stops** when the screen blanks, when the session locks, and across suspend. It resumes from the moment you come back, so the gap belongs to nobody.
-- **Pausing** from the total card stops counting until you resume. +30m and +1h set an end instead (pressed again, they add up, to at most a day), and Tomorrow runs to the next day boundary. A pause survives locking and suspend, and ends on time even if it lapsed while the machine was asleep.
+- **Pausing**: click the Total Screen Time card, or its play/pause button, to stop and start counting. A pause runs until you resume unless you give it an end: the row below the card says when the pause ends and opens a menu of 30 minutes, 1 hour, until tomorrow, or until you resume. While a timed pause is running those two durations add to the time left, so pressing one again extends it, up to a day. Clicking the ticked choice resumes. A pause survives locking and suspend, and ends on time even if it lapsed while the machine was asleep; meanwhile the panel icon carries a pause badge and the total is dimmed.
 - After **10 minutes without keyboard or mouse input** (Idle Timeout in preferences, 0 to disable) counting stops even if the screen stays on, unless something is inhibiting idle the way a playing video does, and resumes on the next input. Time up to the timeout is still counted, so a walk-away costs at most one timeout of over-count.
 - Apps without a `.desktop` file (typically AppImages) are identified by their window class, so their history accumulates instead of splitting across launches.
 - A day runs from midnight by default. **Day Starts At** in preferences moves that boundary, so 4 keeps work between midnight and 4am on the day it started rather than opening a new one. Changing it is not retroactive: time already filed under a date stays there.

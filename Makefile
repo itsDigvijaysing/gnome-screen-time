@@ -8,7 +8,7 @@ SCHEMAS_DIR    = $(SRC_DIR)/schemas
 DIST_DIR       = dist
 PACK_FILE      = $(DIST_DIR)/$(UUID).shell-extension.zip
 
-.PHONY: all build schemas install uninstall reload unreload pack lint check test clean restart
+.PHONY: all build schemas install uninstall reload unreload pack lint check test verify clean restart
 
 # Disables and deletes every dev copy left behind by `make reload`.
 REMOVE_DEV_COPIES = for d in $(EXTENSIONS_DIR)/$(DEV_UUID_GLOB); do \
@@ -120,6 +120,26 @@ check:
 test:
 	@gjs -m tests/run.js
 	@tests/install.sh
+
+# The check that `check` and `test` structurally cannot do: confirm a live
+# enable() actually succeeded. Both of those run without a Shell, so an API
+# misuse in extension.js sails through them and only ever shows up as
+# State: ERROR after a login. That is exactly how a wrong connectObject
+# argument list shipped in 1.3.1, taking the stylesheet down with it.
+# Run this after logging back in. The log is printed only on failure: a
+# logout and login share one boot, so a passing run would otherwise show
+# errors from the broken session that came before it.
+verify:
+	@state=$$(gnome-extensions info $(UUID) 2>/dev/null | sed -n 's/^ *State: //p'); \
+	echo "State: $${state:-not installed}"; \
+	case "$$state" in \
+	  ACTIVE) echo "verify: ok";; \
+	  *) echo "verify: FAILED, extension is not ACTIVE"; \
+	     echo "--- shell log ---"; \
+	     journalctl --user -b 0 -o cat 2>/dev/null \
+	       | grep -F "Extension $(UUID)" | tail -5; \
+	     exit 1;; \
+	esac
 
 lint:
 	@if command -v eslint >/dev/null 2>&1; then \

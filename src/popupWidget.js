@@ -1,6 +1,7 @@
 import St from 'gi://St';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
+import Pango from 'gi://Pango';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as DateUtils from 'resource:///org/gnome/shell/misc/dateUtils.js';
 import { formatTime } from './formatTime.js';
@@ -10,17 +11,20 @@ import { ROW_W, BAR_W, DIM_OPACITY, makeUsageBar } from './usageBar.js';
 import { pauseUntil, pauseKind } from './pause.js';
 
 const MAX_VISIBLE = 5;
-// choice, label when starting a pause, label when one is already timed (the
-// choice then adds to the time left rather than replacing it). Kept short
-// because all four have to sit on one ROW_W-wide line.
+// The pause row's label, capped so no wording can widen the whole popup. The
+// icon, the expander triangle and the item's padding sit outside the label,
+// which is what the subtraction covers.
+const PAUSE_LABEL_W = ROW_W - 76;
+// choice, label, and the label to use while a timed pause is already running,
+// where a timed choice adds to the time left instead of replacing it. Spelling
+// that out ("Add 30 minutes") is only possible because these are menu rows
+// now: as chips on one 230px line there was no room to say it.
 const PAUSE_CHOICES = [
-    ['30m', '30 min', '+30 min'],
+    ['30m', '30 minutes', '+30 min'],
     ['1h', '1 hour', '+1 hour'],
-    ['tomorrow', 'Tomorrow', 'Tomorrow'],
-    ['manual', 'No end', 'No end'],
+    ['tomorrow', 'Until tomorrow', 'Until tomorrow'],
+    ['manual', 'Until I resume', 'Until I resume'],
 ];
-// Under this much left, the paused line adds how long remains.
-const SOON_SECONDS = 30 * 60;
 
 function nowSeconds() {
     return Math.floor(Date.now() / 1000);
@@ -256,10 +260,10 @@ export class PopupWidget {
             y_align: Clutter.ActorAlign.CENTER,
             style: 'font-size: 17px; font-weight: 800; color: ' + CARD_FG + ';',
         }));
-        // Pause and resume, on today only: a pause is about now, not about
-        // the day being looked at.
+        // Pause and resume live on the card, next to the number they affect.
+        // Today only: a pause is about now, not about the day being viewed.
         if (isToday)
-            card.add_child(this._pauseButton());
+            card.add_child(this._pauseButton(paused));
 
         // The gradient is per-usage and therefore inline, which outranks any
         // stylesheet :hover rule, so the hover swap is done here instead.
@@ -267,30 +271,22 @@ export class PopupWidget {
             card.style = cardStyle(tier, card.hover);
         });
 
+        // The whole card toggles, so the small icon is the state indicator
+        // rather than the only hit target. St.Button stops the release event
+        // itself, so clicking the icon does not also run this and undo it.
+        if (isToday) {
+            card.connect('button-release-event', () => {
+                this._setPause(paused ? null : 'manual');
+                return Clutter.EVENT_STOP;
+            });
+        }
+
         item.add_child(card);
         this._menu.addMenuItem(item);
     }
 
     // Pause while tracking, play while paused. Pausing starts open-ended;
     // the chips under the card then set a length.
-    _pauseButton() {
-        let paused = pauseKind(this._settings.get_int64('paused-until'), nowSeconds(),
-            this._settings.get_int('day-start-hour')) !== null;
-        let btn = new St.Button({
-            child: new St.Icon({
-                icon_name: paused ? 'media-playback-start-symbolic' : 'media-playback-pause-symbolic',
-                icon_size: 12,
-                style: `color: ${CARD_FG};`,
-            }),
-            can_focus: true,
-            accessible_name: paused ? 'Resume tracking' : 'Pause tracking',
-            y_align: Clutter.ActorAlign.CENTER,
-            style_class: 'screen-time-card-button',
-            style: 'margin-left: 6px;',
-        });
-        btn.connect('clicked', () => this._setPause(paused ? null : 'manual'));
-        return btn;
-    }
 
     _setPause(choice) {
         let until = choice === null ? 0 : pauseUntil(choice, nowSeconds(),
@@ -300,93 +296,115 @@ export class PopupWidget {
         this._settings.set_int64('paused-until', until);
     }
 
-    // Only while paused. Row one says what is holding and offers the big
-    // Resume target; row two changes how long the pause runs. The card keeps
-    // its own small play button, but that icon is 12px, so Resume lives here
-    // too where it can be hit without aiming.
+    // Two always-present rows, on today only, because a pause is about now
+    // and not about the day being looked at.
+    //
+    // These are plain Shell menu items on purpose. The previous version was a
+    // custom row of chips, which needed the extension's own stylesheet to be
+    // readable at all: when that stylesheet failed to load the chips rendered
+    // as oversized unstyled text that overflowed the popup. Native items are
+    // themed by the Shell, so the worst case is plain, never broken. It also
+    // removes the 230px width ceiling, which is what forced labels like
+    // "+30m" that said nothing about what they added to.
+    // 16px glyph in a padded, rounded hit area. The first version of this was
+    // a 12px icon with 3px of padding and was genuinely hard to click, which
+    // read as "resume is broken" on top of the real grab bug underneath it.
+    _pauseButton(paused) {
+        let btn = new St.Button({
+            child: new St.Icon({
+                icon_name: paused
+                    ? 'media-playback-start-symbolic'
+                    : 'media-playback-pause-symbolic',
+                icon_size: 16,
+                style: `color: ${CARD_FG};`,
+            }),
+            can_focus: true,
+            accessible_name: paused ? 'Resume tracking' : 'Pause tracking',
+            y_align: Clutter.ActorAlign.CENTER,
+            style_class: 'screen-time-card-button',
+            style: 'margin-left: 8px;',
+        });
+        btn.connect('clicked', () => this._setPause(paused ? null : 'manual'));
+        return btn;
+    }
+
+    // Only while a pause is running, and only on today. The card's button is
+    // what starts one; this row says what is holding and opens the durations.
+    //
+    // Native menu items on purpose. The version before this was a custom chip
+    // row that needed the extension's own stylesheet just to be readable, so
+    // when that stylesheet failed to load it rendered as oversized unstyled
+    // text overflowing the popup. Shell items are themed by the Shell: the
+    // worst case is plain, never broken.
     _addPauseBlock() {
+        if (this._date !== todayKeyFor(this._settings))
+            return;
+
         let now = nowSeconds();
         let until = this._settings.get_int64('paused-until');
         let startHour = this._settings.get_int('day-start-hour');
         let kind = pauseKind(until, now, startHour);
-        if (!kind)
+        if (!kind) {
+            this._pauseMenuOpen = false;
             return;
-
-        let item = new PopupMenu.PopupBaseMenuItem({activate: false});
-        item.track_hover = false;
-        item.style = 'padding: 0;';
-        let col = new St.BoxLayout({
-            vertical: true,
-            x_expand: true,
-            style: `padding: 8px 10px 4px 10px; width: ${ROW_W}px;`,
-        });
-
-        let top = new St.BoxLayout();
-        top.add_child(new St.Icon({
-            icon_name: 'media-playback-pause-symbolic',
-            icon_size: 14,
-            y_align: Clutter.ActorAlign.CENTER,
-        }));
-        top.add_child(new St.Label({
-            text: `Paused ${this._pauseEndsText(kind, until, now)}`,
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-            style: 'font-size: 12px; font-weight: 600; padding-left: 6px;',
-        }));
-        let resume = new St.Button({
-            label: 'Resume',
-            style_class: 'screen-time-chip screen-time-chip-suggested',
-            can_focus: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        resume.connect('clicked', () => this._setPause(null));
-        top.add_child(resume);
-        col.add_child(top);
-
-        // Without this the four chips below are unexplained: "+30m" says
-        // nothing about what it adds to.
-        col.add_child(new St.Label({
-            text: kind === 'until' ? 'Extend or change' : 'Or pause for',
-            opacity: DIM_OPACITY,
-            style: 'font-size: 10px; padding: 6px 0 3px 0;',
-        }));
-
-        let chips = new St.BoxLayout({style: 'spacing: 3px;'});
-        for (let [choice, label, addLabel] of PAUSE_CHOICES) {
-            // 'until' is the only state where a timed choice adds rather than
-            // replaces, so it is the only one that gets the "+" label.
-            let active = choice === kind;
-            let chip = new St.Button({
-                label: kind === 'until' ? addLabel : label,
-                style_class: active
-                    ? 'screen-time-chip screen-time-chip-active'
-                    : 'screen-time-chip',
-                can_focus: true,
-            });
-            chip.connect('clicked', () => this._setPause(choice));
-            chips.add_child(chip);
         }
-        col.add_child(chips);
 
-        item.add_child(col);
-        this._menu.addMenuItem(item);
+        let sub = new PopupMenu.PopupSubMenuMenuItem(
+            this._pauseStateText(kind, until), true);
+        sub.icon.icon_name = 'media-playback-pause-symbolic';
+        // Pinned width plus ellipsis: a menu sizes itself to its widest child,
+        // so without this an unusually long end time would widen the popup and
+        // drag the card and every app row out with it.
+        sub.label.style = `width: ${PAUSE_LABEL_W}px;`;
+        sub.label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
+        // Choosing a duration would otherwise dismiss the whole popup: an item
+        // activating asks its top menu to close. Scoped to this submenu, so the
+        // footer's settings button still closes the menu as it should.
+        sub.menu.itemActivated = () => {};
+        sub.menu.connect('open-state-changed', (m, open) => {
+            this._pauseMenuOpen = open;
+        });
+
+        for (let [choice, label, addLabel] of PAUSE_CHOICES) {
+            // While a timed pause runs, the two durations add to the time
+            // left, so they say "+30 min" and pressing one again extends.
+            // From an open-ended or until-tomorrow pause there is no end to
+            // add to, so they set one instead and read as plain durations.
+            let item = new PopupMenu.PopupMenuItem(
+                kind === 'until' ? addLabel : label);
+            // Only the two open-ended choices are states a tick can describe.
+            // '30m' and '1h' are actions, never equal to `kind`, so they never
+            // get one; and a timed pause ends at a clock time no single choice
+            // represents, which the row's own title already spells out.
+            item.setOrnament(choice === kind
+                ? PopupMenu.Ornament.CHECK
+                : PopupMenu.Ornament.NONE);
+            // A ticked row is the current state, so pressing it again
+            // clears it and resumes. The two durations are never ticked, so
+            // they are unaffected and keep adding.
+            item.connect('activate',
+                () => this._setPause(choice === kind ? null : choice));
+            sub.menu.addMenuItem(item);
+        }
+        this._menu.addMenuItem(sub);
+        // Setting a duration rewrites paused-until, which rebuilds the whole
+        // menu, which would collapse this. Reopen it so the list stays put
+        // under the pointer. Same trick the App Timer section already uses.
+        if (this._pauseMenuOpen)
+            sub.menu.open(false);
     }
 
-    // "until you resume", "until tomorrow", or a clock time, with how long is
-    // left once the end is close enough that the clock time stops helping.
-    _pauseEndsText(kind, until, now) {
+    // When the pause ends, and nothing else. An earlier version appended how
+    // long was left, which read well but made this the widest row in the menu
+    // and stretched the card and every app row along with it.
+    _pauseStateText(kind, until) {
         if (kind === 'manual')
-            return 'until you resume';
+            return 'Paused till you resume';
         if (kind === 'tomorrow')
-            return 'until tomorrow';
-        let end = GLib.DateTime.new_from_unix_local(until);
-        let sameDay = end.format('%F') === GLib.DateTime.new_from_unix_local(now).format('%F');
-        let text = `until ${sameDay ? '' : 'tomorrow '}` +
-            DateUtils.formatTime(end, {timeOnly: true});
-        // Rounded up, so the last minute reads 1m rather than 0m.
-        if (until - now < SOON_SECONDS)
-            text += `, ${formatTime(Math.ceil((until - now) / 60) * 60)} left`;
-        return text;
+            return 'Paused till tomorrow';
+        // A pause runs at most a day, so the clock time alone is unambiguous.
+        return `Paused till ${DateUtils.formatTime(
+            GLib.DateTime.new_from_unix_local(until), {timeOnly: true})}`;
     }
 
     _addAppRow(app, total, color) {

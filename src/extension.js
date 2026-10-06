@@ -25,9 +25,16 @@ export default class ScreenTimeExtension extends Extension {
         };
         this._indicator.setTotal(this._store.getTodayTotal());
 
+        // connectObject takes the owner object ONCE, after every
+        // (signal, handler) pair. Repeating it per pair makes the next pair's
+        // owner land where a signal name is expected, and enable() throws
+        // "Couldn't convert to string" before reaching the two syncs below:
+        // the extension lands in ERROR state, its stylesheet is dropped, and
+        // the panel keeps whatever defaults the indicator was built with.
         this._settings.connectObject(
-            'changed::show-total-in-panel', () => this._syncPanelLabel(), this,
-            'changed::paused-until', () => this._syncPaused(), this);
+            'changed::show-total-in-panel', () => this._syncPanelLabel(),
+            'changed::paused-until', () => this._syncPaused(),
+            this);
         this._syncPanelLabel();
         this._syncPaused();
     }

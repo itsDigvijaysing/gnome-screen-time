@@ -4,6 +4,6 @@
     "uuid": "screen-time@gnome-screen-time",
     "url": "https://github.com/itsdigvijaysing/gnome-screen-time",
     "shell-version": ["47", "48", "49", "50"],
-    "version-name": "1.3.1",
+    "version-name": "1.3.2",
     "settings-schema": "org.gnome.shell.extensions.screen-time"
 }
