@@ -1,5 +1,4 @@
 UUID           = screen-time@gnome-screen-time
-VERSION        = 1.2.1
 EXTENSIONS_DIR = $(HOME)/.local/share/gnome-shell/extensions
 EXTENSION_DIR  = $(EXTENSIONS_DIR)/$(UUID)
 # `make reload` installs under a throwaway UUID of this shape.
