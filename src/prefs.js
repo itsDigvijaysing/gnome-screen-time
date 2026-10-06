@@ -7,7 +7,14 @@ import { STORE_FILE, knownAppsFromData, dateKey } from './usageStore.js';
 import { formatTime } from './formatTime.js';
 import { getAppLimits, setAppLimit, removeAppLimit } from './appLimits.js';
 
-const HISTORY_DAYS = 7;
+// The chart's ranges. `purge-requested` is a fixed 7-day window defined by
+// the schema, so it gets its own constant: changing what the chart shows must
+// never change what the Delete button deletes.
+const RANGE_CHOICES = [7, 30, 90];
+const PURGE_DAYS = 7;
+// Past this many bars the per-day labels stop fitting, so the axis switches
+// to three date ticks instead.
+const DENSE_AFTER = 14;
 const CHART_HEIGHT = 110;
 // Same accent blue the popup uses for the largest app, so the two views read
 // as one product.
@@ -42,12 +49,34 @@ function lastDays(data, count, startHour) {
             .reduce((s, a) => s + a.seconds, 0);
         days.push({
             label: i === 0 ? 'Today' : day.format('%a'),
+            tick: i === 0 ? 'Today' : day.format('%d %b'),
             seconds,
         });
     }
     return days;
 }
 
+// Summary of a range: the three numbers that answer "how have I been doing",
+// which a bare chart leaves you to eyeball. Days with no data are left out of
+// the average, so a machine that was off for a week does not read as a week
+// of light use.
+function summarise(days) {
+    let used = days.filter(d => d.seconds > 0);
+    let total = used.reduce((sum, d) => sum + d.seconds, 0);
+    if (used.length === 0)
+        return null;
+    let busiest = used.reduce((a, b) => (b.seconds > a.seconds ? b : a));
+    return {
+        total,
+        average: Math.round(total / used.length),
+        busiest,
+        trackedDays: used.length,
+    };
+}
+
+// The bar chart. `days` is oldest-first, so it reads left to right ending at
+// today. Above DENSE_AFTER bars the per-day labels are replaced by three date
+// ticks, because 30 or 90 captions will not fit and overlap into mush.
 function buildHistogram(days) {
     let box = new Gtk.Box({
         orientation: Gtk.Orientation.VERTICAL,
@@ -66,7 +95,10 @@ function buildHistogram(days) {
     area.set_draw_func((widget, cr, width, height) => {
         let max = Math.max(...days.map(d => d.seconds), 1);
         let slot = width / days.length;
-        let barW = Math.min(slot * 0.55, 36);
+        // A dense range gets thinner bars with a hairline gap, so 90 of them
+        // still read as separate days rather than one solid block.
+        let barW = Math.max(
+            days.length > DENSE_AFTER ? slot - 1 : Math.min(slot * 0.55, 36), 1);
 
         days.forEach((d, i) => {
             let x = i * slot + (slot - barW) / 2;
@@ -87,6 +119,31 @@ function buildHistogram(days) {
     });
     box.append(area);
 
+    box.append(days.length > DENSE_AFTER ? buildTicks(days) : buildDayLabels(days));
+
+    let stats = summarise(days);
+    if (stats) {
+        // One line rather than three rows: this is context for the chart
+        // above it, not something you act on.
+        box.append(new Gtk.Label({
+            label: `Total ${formatTime(stats.total)}  ·  ` +
+                `Average ${formatTime(stats.average)} on the ${stats.trackedDays} ` +
+                `day${stats.trackedDays === 1 ? '' : 's'} tracked  ·  ` +
+                `Busiest ${stats.busiest.tick} (${formatTime(stats.busiest.seconds)})`,
+            css_classes: ['caption', 'dim-label'],
+            wrap: true,
+            justify: Gtk.Justification.CENTER,
+            margin_start: 12,
+            margin_end: 12,
+            margin_bottom: 12,
+        }));
+    }
+
+    return box;
+}
+
+// One caption per bar: weekday on top, time underneath. Short ranges only.
+function buildDayLabels(days) {
     let labels = new Gtk.Box({
         homogeneous: true,
         margin_start: 12,
@@ -105,9 +162,31 @@ function buildHistogram(days) {
         }));
         labels.append(cell);
     }
-    box.append(labels);
+    return labels;
+}
 
-    return box;
+// Oldest, middle and today, pinned to the ends so they line up with the bars
+// they describe rather than floating between them.
+function buildTicks(days) {
+    let row = new Gtk.Box({
+        margin_start: 12,
+        margin_end: 12,
+        margin_bottom: 12,
+    });
+    let picks = [
+        [days[0], Gtk.Align.START, true],
+        [days[Math.floor(days.length / 2)], Gtk.Align.CENTER, true],
+        [days[days.length - 1], Gtk.Align.END, false],
+    ];
+    for (let [day, align, expand] of picks) {
+        row.append(new Gtk.Label({
+            label: day.tick,
+            css_classes: ['caption', 'dim-label'],
+            halign: align,
+            hexpand: expand,
+        }));
+    }
+    return row;
 }
 
 export default class ScreenTimePreferences extends ExtensionPreferences {
@@ -121,12 +200,16 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
         const page = new Adw.PreferencesPage();
         window.add(page);
 
-        const panelGroup = new Adw.PreferencesGroup({title: 'Panel'});
+        const panelGroup = new Adw.PreferencesGroup({title: 'Top Bar'});
         page.add(panelGroup);
 
+        // "Panel" is the GNOME term for the top bar, but to anyone who has
+        // just clicked the icon, the panel is the popup. Spell out which one
+        // this hides, and that the popup's own total is not affected.
         const showTotalRow = new Adw.SwitchRow({
-            title: 'Show total time in panel',
-            subtitle: 'Off shows only the icon.',
+            title: 'Show today\'s total next to the icon',
+            subtitle: 'Off shows only the icon in the top bar. '
+                + 'The popup always shows the total.',
         });
         settings.bind('show-total-in-panel', showTotalRow, 'active',
             Gio.SettingsBindFlags.DEFAULT);
@@ -211,14 +294,72 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
 
         const historyGroup = new Adw.PreferencesGroup({
             title: 'History',
-            description: `Total screen time over the last ${HISTORY_DAYS} days.`,
+            description: 'How long you have spent at the computer each day.',
         });
         page.add(historyGroup);
-        historyGroup.add(buildHistogram(
-            lastDays(data, HISTORY_DAYS, settings.get_int('day-start-hour'))));
+
+        // Retention caps what is worth offering: with retention at 30 there is
+        // nothing behind day 30, and a 90-day range would be 60 empty bars
+        // pretending to be data. 0 means keep forever, so everything stands.
+        const retention = settings.get_int('retention-days');
+        const longest = RANGE_CHOICES[RANGE_CHOICES.length - 1];
+        // Only ranges retention can actually fill, plus the retention window
+        // itself when it falls between two choices (45 gives 7/30/45), so the
+        // whole kept history stays reachable and no range is padded with days
+        // that were already deleted. 0 keeps forever, so all choices stand.
+        const ranges = retention <= 0
+            ? [...RANGE_CHOICES]
+            : [...new Set([
+                ...RANGE_CHOICES.filter(d => d <= retention),
+                Math.min(retention, longest),
+            ])].sort((a, b) => a - b);
+
+        // Both containers are added up front, in the order they are read:
+        // range buttons, then the chart. Switching range only ever swaps the
+        // chart's child, so the group's rows can never end up reordered, and
+        // nothing has to be removed and re-added to stay above the Delete row.
+        const switcher = new Gtk.Box({
+            css_classes: ['linked'],
+            halign: Gtk.Align.CENTER,
+            margin_top: 8,
+            visible: ranges.length > 1,
+        });
+        historyGroup.add(switcher);
+        const chartBox = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
+        historyGroup.add(chartBox);
+
+        // Rebuilt rather than redrawn: above DENSE_AFTER days the axis swaps
+        // per-day captions for date ticks, which is a different widget tree.
+        const showRange = days => {
+            let previous = chartBox.get_first_child();
+            if (previous)
+                chartBox.remove(previous);
+            chartBox.append(buildHistogram(
+                lastDays(data, days, settings.get_int('day-start-hour'))));
+        };
+
+        // Buttons are wired only now, so a `toggled` emitted while the group
+        // is being built cannot reach showRange before chartBox exists.
+        let firstButton = null;
+        for (let days of ranges) {
+            let btn = new Gtk.ToggleButton({
+                label: `${days} days`,
+                active: days === ranges[0],
+            });
+            // One group, so choosing one releases the others.
+            if (firstButton)
+                btn.set_group(firstButton);
+            else
+                firstButton = btn;
+            btn.connect('toggled', () => {
+                if (btn.active)
+                    showRange(days);
+            });
+            switcher.append(btn);
+        }
 
         const purgeRow = new Adw.ActionRow({
-            title: `Delete data older than ${HISTORY_DAYS} days`,
+            title: `Delete data older than ${PURGE_DAYS} days`,
             subtitle: 'Removes all tracked history beyond the last week. This cannot be undone.',
         });
         const purgeButton = new Gtk.Button({
@@ -231,6 +372,7 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
         });
         purgeRow.add_suffix(purgeButton);
         historyGroup.add(purgeRow);
+        showRange(ranges[0]);
 
         // Read from metadata.json rather than a constant here, so the version
         // has exactly one source of truth and can never drift from the build.
