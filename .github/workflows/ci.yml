@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # gjs runs the module syntax check and the unit suite; libglib2.0-bin
+      # provides glib-compile-schemas, which `make` needs before anything
+      # that reads the schema. zip is for `make pack`.
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gjs libglib2.0-bin zip
+
+      - name: Compile schemas
+        run: make
+
+      # gjs -m every module, and validate metadata.json.
+      - name: Check
+        run: make check
+
+      # Unit suite plus tests/install.sh, which holds an mmap open across a
+      # second `make install` to prove the recipe replaces files instead of
+      # rewriting them in place. install.sh refuses to run if its scratch
+      # path resolves under a real ~/.local/share/gnome-shell.
+      - name: Test
+        run: make test
+
+  ego-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libglib2.0-bin zip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Lint the packaged zip, never the source tree: linting the tree
+      # reports false positives for .git/hooks/* and the Makefile.
+      - name: Build the release zip
+        run: make pack
+
+      # Unpinned on purpose: shexli tracks the extensions.gnome.org review
+      # rules, and a new rule failing CI here is the point. Better to find
+      # out on a PR than in a rejected submission.
+      - name: Install shexli
+        run: pip install shexli
+
+      # Hard gate: the text output is human-readable but says nothing a
+      # script can rely on, and shexli has no --strict flag. Parse the JSON
+      # and fail on ANY finding, whatever its severity.
+      - name: Lint the zip against the extensions.gnome.org review rules
+        run: |
+          shexli --format json dist/screen-time@gnome-screen-time.shell-extension.zip > shexli.json
+          python3 - <<'EOF'
+          import json, sys
+          r = json.load(open('shexli.json'))
+          s = r['summary']
+          n, status = s['finding_count'], s['status']
+          print(f"shexli status={status} findings={n} severities={s.get('severity_counts', {})}")
+          for f in r['findings']:
+              print(f"  [{f.get('severity','?')}] {f.get('rule_id','?')}: "
+                    f"{f.get('message','?')} ({f.get('path','?')})")
+          if n != 0 or status != 'clean':
+              sys.exit(f"FAIL: extensions.gnome.org review would flag this ({n} finding(s)).")
+          print("clean: 0 findings, 0 warnings, 0 errors")
+          EOF
+
+      - name: Upload the lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shexli-report
+          path: shexli.json
