@@ -9,7 +9,7 @@ The panel shows today's total at a glance. Click it for a per-app breakdown, and
 ## Features
 
 - **Panel indicator:** today's total next to the clock, or just the icon if you prefer.
-- **Per-app breakdown:** top five apps with usage bars and percentages; everything else folds into a collapsible "Other N apps" row, so the numbers always add up to the total.
+- **Per-app breakdown:** top five apps with usage bars (drawn against the longest row, so small apps stay visible) and percentages of the day; everything else folds into a collapsible "Other N apps" row, so the numbers always add up to the total.
 - **Day-by-day history:** `‹ Today ›` steps back one day at a time.
 - **App time limits:** set a daily limit per app and get a desktop notification once you cross it.
 - **Pause:** stop counting from the total card, until you resume, for a set time, or until tomorrow; the panel icon carries a pause badge meanwhile.

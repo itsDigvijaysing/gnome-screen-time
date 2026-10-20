@@ -157,16 +157,20 @@ export class PopupWidget {
         } else {
             let top = all.filter(a => a.seconds >= MIN_ROW_SECONDS)
                 .slice(0, MAX_VISIBLE);
-            for (let i = 0; i < top.length; i++)
-                this._addAppRow(top[i], total, COLORS[i % COLORS.length]);
-
             // Everything not given its own row, including the sub-minute apps,
             // is folded in here, so the rows reconcile with the total.
             let rest = all.filter(a => !top.includes(a));
+            let restSeconds = rest.reduce((s, a) => s + a.seconds, 0);
+            // Bars are drawn against the longest row (the fold counts as one)
+            // so the tail isn't a row of slivers; the percentages stay shares
+            // of the day.
+            let scale = Math.max(restSeconds, ...top.map(a => a.seconds)) || 1;
+            for (let i = 0; i < top.length; i++)
+                this._addAppRow(top[i], total, COLORS[i % COLORS.length], scale);
+
             if (rest.length > 0) {
-                let restSeconds = rest.reduce((s, a) => s + a.seconds, 0);
                 this._addOtherAppsRow(rest, restSeconds, total,
-                    COLORS[top.length % COLORS.length]);
+                    COLORS[top.length % COLORS.length], scale);
             }
         }
 
@@ -407,12 +411,12 @@ export class PopupWidget {
             GLib.DateTime.new_from_unix_local(until), {timeOnly: true})}`;
     }
 
-    _addAppRow(app, total, color) {
+    _addAppRow(app, total, color, scale) {
         let item = new PopupMenu.PopupBaseMenuItem({activate: false});
         item.track_hover = false;
         item.style = 'padding: 0;';
         let pct = total > 0 ? Math.round(app.seconds / total * 100) : 0;
-        let fillW = Math.round(BAR_W * pct / 100);
+        let fillW = Math.round(BAR_W * app.seconds / scale);
 
         let row = new St.BoxLayout({
             vertical: true,
@@ -439,12 +443,12 @@ export class PopupWidget {
         return item;
     }
 
-    _addOtherAppsRow(otherApps, otherTotal, total, color) {
+    _addOtherAppsRow(otherApps, otherTotal, total, color, scale) {
         let item = new PopupMenu.PopupBaseMenuItem({activate: false});
         item.track_hover = false;
         item.style = 'padding: 0;';
         let pct = total > 0 ? Math.round(otherTotal / total * 100) : 0;
-        let fillW = Math.round(BAR_W * pct / 100);
+        let fillW = Math.round(BAR_W * otherTotal / scale);
 
         let row = new St.BoxLayout({
             vertical: true,
@@ -481,7 +485,7 @@ export class PopupWidget {
         let otherItems = [];
         for (let i = 0; i < otherApps.length; i++) {
             let appItem = this._addAppRow(otherApps[i], total,
-                COLORS[(MAX_VISIBLE + i) % COLORS.length]);
+                COLORS[(MAX_VISIBLE + i) % COLORS.length], scale);
             appItem.hide();
             otherItems.push(appItem);
         }
