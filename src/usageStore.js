@@ -208,6 +208,33 @@ export class UsageStore {
         this.onChange?.(appId, displayName, this._data[today][appId].seconds);
     }
 
+    // Removes one app's entry from one day, returning it so it can be put
+    // back with restoreEntry(), or null if there was none. A day left empty
+    // goes too.
+    deleteEntry(dateKey, appId) {
+        let day = this._data[dateKey];
+        let entry = day?.[appId];
+        if (!entry)
+            return null;
+        delete day[appId];
+        if (Object.keys(day).length === 0)
+            delete this._data[dateKey];
+        this._dirty = true;
+        this.onChange?.();
+        return { ...entry };
+    }
+
+    // Undoes deleteEntry(). Time tracked for the app since the delete is
+    // added to, not overwritten, so nothing recorded in between is lost.
+    restoreEntry(dateKey, appId, entry) {
+        this._data[dateKey] ??= {};
+        let day = this._data[dateKey];
+        let seconds = entry.seconds + (day[appId]?.seconds ?? 0);
+        day[appId] = { ...entry, seconds };
+        this._dirty = true;
+        this.onChange?.();
+    }
+
     getTodayTotal() {
         return this.getTotalForDate(todayKey(this._dayStartHour()));
     }

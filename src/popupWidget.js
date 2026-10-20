@@ -7,10 +7,17 @@ import * as DateUtils from 'resource:///org/gnome/shell/misc/dateUtils.js';
 import { formatTime } from './formatTime.js';
 import { todayKey, todayKeyFor, dateKey } from './usageStore.js';
 import { AppTimerSection } from './appTimerSection.js';
-import { ROW_W, BAR_W, DIM_OPACITY, makeUsageBar } from './usageBar.js';
+import { ROW_W, DIM_OPACITY, makeUsageBar } from './usageBar.js';
 import { pauseUntil, pauseKind } from './pause.js';
 
 const MAX_VISIBLE = 5;
+// The edit pen sits at the row's right edge, under the end of the time
+// label, in the room bars already leave there; bars stop a few pixels
+// short of it. The Other row keeps the same length so every bar matches.
+const PEN_W = 16;
+const EDIT_BAR_W = ROW_W - PEN_W - 6;
+// Resting opacity of the pen: faint until its row is hovered.
+const PEN_OPACITY = 70;
 // The pause row's label, capped so no wording can widen the whole popup. The
 // icon, the expander triangle and the item's padding sit outside the label,
 // which is what the subtraction covers.
@@ -84,11 +91,19 @@ export class PopupWidget {
         this._openPrefs = openPrefs;
         this._date = todayKeyFor(settings);
         this._timerSection = new AppTimerSection(store, settings);
+        // Row editing: the app whose action line is open, and the last
+        // delete, undoable until the popup closes.
+        this._editing = null;
+        this._undo = null;
+        this._otherExpanded = false;
 
         this._build();
 
         this._openId = this._menu.connect('open-state-changed', (m, open) => {
-            if (open) this._refresh();
+            if (open)
+                this._refresh();
+            else
+                this._undo = null;
         });
         // A pause can end, or be changed, while the popup is open: the
         // tracker clears one that lapses. Follow it rather than show a
@@ -118,6 +133,8 @@ export class PopupWidget {
     _refresh() {
         this._date = todayKeyFor(this._settings);
         this._timerSection.reset();
+        this._editing = null;
+        this._otherExpanded = false;
         this._build();
     }
 
@@ -136,6 +153,15 @@ export class PopupWidget {
         let all = this._store.getUsageForDate(this._date);
         // Same number the panel label shows, so the two can never disagree.
         let total = this._store.getTotalForDate(this._date);
+        // A delete still undoable keeps its place, so nothing moves under
+        // the pointer: a placeholder at the entry's old rank, which the
+        // total and the Other row leave out.
+        let undo = this._undo?.date === this._date ? this._undo : null;
+        if (undo) {
+            all.push({appId: undo.appId, displayName: undo.name,
+                seconds: undo.entry.seconds, deleted: true});
+            all.sort((a, b) => b.seconds - a.seconds);
+        }
 
         this._addDateNav();
         this._addTotalCard(total);
@@ -160,17 +186,25 @@ export class PopupWidget {
             // Everything not given its own row, including the sub-minute apps,
             // is folded in here, so the rows reconcile with the total.
             let rest = all.filter(a => !top.includes(a));
-            let restSeconds = rest.reduce((s, a) => s + a.seconds, 0);
+            let restSeconds = rest.reduce((s, a) => s + (a.deleted ? 0 : a.seconds), 0);
             // Bars are drawn against the longest row (the fold counts as one)
             // so the tail isn't a row of slivers; the percentages stay shares
-            // of the day.
-            let scale = Math.max(restSeconds, ...top.map(a => a.seconds)) || 1;
+            // of the day. A row awaiting undo keeps its old seconds so it
+            // holds its rank, but it draws no bar, so it is left out of the
+            // scale: otherwise deleting the biggest app would shrink every
+            // remaining bar. The trailing 1 is the floor for an empty or
+            // all-deleted day, where Math.max would give -Infinity.
+            let scale = Math.max(restSeconds,
+                ...top.filter(a => !a.deleted).map(a => a.seconds), 1);
             for (let i = 0; i < top.length; i++)
                 this._addAppRow(top[i], total, COLORS[i % COLORS.length], scale);
 
-            if (rest.length > 0) {
+            if (rest.some(a => !a.deleted)) {
                 this._addOtherAppsRow(rest, restSeconds, total,
                     COLORS[top.length % COLORS.length], scale);
+            } else if (rest.length > 0) {
+                // Only the deleted app was left to fold: no Other row for it.
+                this._addAppRow(rest[0], total, null, scale);
             }
         }
 
@@ -412,11 +446,12 @@ export class PopupWidget {
     }
 
     _addAppRow(app, total, color, scale) {
+        if (app.deleted)
+            return [this._addUndoRow()];
         let item = new PopupMenu.PopupBaseMenuItem({activate: false});
         item.track_hover = false;
         item.style = 'padding: 0;';
         let pct = total > 0 ? Math.round(app.seconds / total * 100) : 0;
-        let fillW = Math.round(BAR_W * app.seconds / scale);
 
         let row = new St.BoxLayout({
             vertical: true,
@@ -436,9 +471,105 @@ export class PopupWidget {
         }));
         row.add_child(topRow);
 
-        row.add_child(makeUsageBar(fillW, color));
+        let barLine = new St.BoxLayout();
+        barLine.add_child(makeUsageBar(
+            Math.round(EDIT_BAR_W * app.seconds / scale), color, EDIT_BAR_W));
+        barLine.add_child(new St.Widget({x_expand: true}));
+        let pen = this._penButton(app);
+        barLine.add_child(pen);
+        row.add_child(barLine);
+        // The pen brightens while its row is hovered, and stays bright
+        // while its line is open.
+        row.reactive = true;
+        row.track_hover = true;
+        row.connect('notify::hover', () => {
+            pen.opacity = row.hover || this._editing === app.appId ? 255 : PEN_OPACITY;
+        });
 
         item.add_child(row);
+        this._menu.addMenuItem(item);
+        let items = [item];
+        if (this._editing === app.appId)
+            items.push(this._addActionsLine(app));
+        return items;
+    }
+
+    // Opens or closes this app's action line; one row at a time.
+    _penButton(app) {
+        let open = this._editing === app.appId;
+        let btn = new St.Button({
+            child: new St.Icon({icon_name: 'document-edit-symbolic', icon_size: 12}),
+            style_class: 'screen-time-nav-button',
+            style: 'padding: 0 2px;',
+            opacity: open ? 255 : PEN_OPACITY,
+            can_focus: true,
+            accessible_name: `Edit ${app.displayName}`,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        btn.connect('clicked', () => {
+            this._editing = open ? null : app.appId;
+            this._build();
+        });
+        return btn;
+    }
+
+    // Delete removes this day's entry, with an undo line until the popup
+    // closes.
+    _addActionsLine(app) {
+        let item = new PopupMenu.PopupBaseMenuItem({activate: false});
+        item.track_hover = false;
+        item.style = 'padding: 0;';
+        let line = new St.BoxLayout({
+            style: `padding: 0 10px 4px 10px; spacing: 4px; width: ${ROW_W}px;`,
+        });
+
+        line.add_child(this._lineButton('Delete', () => {
+            let entry = this._store.deleteEntry(this._date, app.appId);
+            if (entry)
+                this._undo = {date: this._date, appId: app.appId, entry, name: app.displayName};
+            this._closeEdit();
+        }));
+        item.add_child(line);
+        this._menu.addMenuItem(item);
+        return item;
+    }
+
+    _closeEdit() {
+        this._editing = null;
+        this._build();
+    }
+
+    _lineButton(label, onClick) {
+        let btn = new St.Button({
+            label,
+            style_class: 'button',
+            style: 'font-size: 10px; padding: 2px 10px;',
+            can_focus: true,
+        });
+        btn.connect('clicked', onClick);
+        return btn;
+    }
+
+    // Stands in for the row just deleted, until the popup closes.
+    _addUndoRow() {
+        let undo = this._undo;
+        let item = new PopupMenu.PopupBaseMenuItem({activate: false});
+        item.track_hover = false;
+        item.style = 'padding: 0;';
+        let line = new St.BoxLayout({style: `padding: 4px 10px; width: ${ROW_W}px;`});
+        line.add_child(new St.Label({
+            text: `${undo.name} deleted`,
+            opacity: DIM_OPACITY,
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'font-size: 11px;',
+        }));
+        line.add_child(this._lineButton('Undo', () => {
+            this._store.restoreEntry(undo.date, undo.appId, undo.entry);
+            this._undo = null;
+            this._build();
+        }));
+        item.add_child(line);
         this._menu.addMenuItem(item);
         return item;
     }
@@ -448,7 +579,7 @@ export class PopupWidget {
         item.track_hover = false;
         item.style = 'padding: 0;';
         let pct = total > 0 ? Math.round(otherTotal / total * 100) : 0;
-        let fillW = Math.round(BAR_W * otherTotal / scale);
+        let fillW = Math.round(EDIT_BAR_W * otherTotal / scale);
 
         let row = new St.BoxLayout({
             vertical: true,
@@ -457,7 +588,7 @@ export class PopupWidget {
 
         let topRow = new St.BoxLayout();
         topRow.add_child(new St.Label({
-            text: `Other ${otherApps.length} apps`,
+            text: `Other ${otherApps.filter(a => !a.deleted).length} apps`,
             opacity: DIM_OPACITY,
             style: 'font-size: 11px; font-weight: 500;',
         }));
@@ -468,37 +599,37 @@ export class PopupWidget {
             style: 'font-size: 10px;',
         }));
         let expandArrow = new St.Label({
-            text: ' ▸',
+            text: this._otherExpanded ? ' ▾' : ' ▸',
             opacity: DIM_OPACITY,
             style: 'font-size: 10px;',
         });
         topRow.add_child(expandArrow);
         row.add_child(topRow);
 
-        row.add_child(makeUsageBar(fillW, color));
+        // No pen for a fold of many apps; the gap keeps the bars aligned.
+        row.add_child(makeUsageBar(fillW, color, EDIT_BAR_W));
 
         let btn = new St.Button({child: row, style: 'padding: 0;'});
         item.add_child(btn);
         this._menu.addMenuItem(item);
 
-        let expanded = false;
+        // Kept on the widget, so opening an app's action line in here (which
+        // rebuilds the popup) leaves the list open.
         let otherItems = [];
         for (let i = 0; i < otherApps.length; i++) {
-            let appItem = this._addAppRow(otherApps[i], total,
-                COLORS[(MAX_VISIBLE + i) % COLORS.length], scale);
-            appItem.hide();
-            otherItems.push(appItem);
+            otherItems.push(...this._addAppRow(otherApps[i], total,
+                COLORS[(MAX_VISIBLE + i) % COLORS.length], scale));
         }
+        let sync = () => {
+            expandArrow.text = this._otherExpanded ? ' ▾' : ' ▸';
+            for (let oi of otherItems)
+                oi.visible = this._otherExpanded;
+        };
+        sync();
 
         btn.connect('clicked', () => {
-            expanded = !expanded;
-            expandArrow.text = expanded ? ' ▾' : ' ▸';
-            for (let oi of otherItems) {
-                if (expanded)
-                    oi.show();
-                else
-                    oi.hide();
-            }
+            this._otherExpanded = !this._otherExpanded;
+            sync();
         });
     }
 

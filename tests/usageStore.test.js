@@ -317,3 +317,55 @@ test('a day key shifted by whole days is never offset again', () => {
     let [y, m, d] = key.split('-').map(Number);
     assertEqual(dateKey(GLib.DateTime.new_local(y, m, d, 0, 0, 0)), key);
 });
+
+test('deleteEntry: removes one app from one day and hands it back', async () => {
+    let today = todayKey();
+    writeStoreFile({ [today]: {
+        'a.desktop': { displayName: 'A', seconds: 600 },
+        'b.desktop': { displayName: 'B', seconds: 300 },
+    } });
+    let store = new UsageStore(new FakeSettings());
+    await whenLoaded(store);
+    let removed = store.deleteEntry(today, 'a.desktop');
+    assertEqual(removed, { displayName: 'A', seconds: 600 });
+    assertEqual(store.getUsageForDate(today).map(a => a.appId), ['b.desktop']);
+    assertEqual(store.getTotalForDate(today), 300);
+    assertEqual(store.deleteEntry(today, 'a.desktop'), null, 'already gone');
+    store.destroy();
+});
+
+test('deleteEntry: a day left empty goes too', async () => {
+    let day = daysAgoKey(1);
+    writeStoreFile({ [day]: { 'a.desktop': { displayName: 'A', seconds: 60 } } });
+    let store = new UsageStore(new FakeSettings());
+    await whenLoaded(store);
+    store.deleteEntry(day, 'a.desktop');
+    store._save();
+    assertEqual(day in readStoreFile(), false);
+    store.destroy();
+});
+
+test('restoreEntry: puts a deleted entry back exactly', async () => {
+    let today = todayKey();
+    writeStoreFile({ [today]: { 'a.desktop': { displayName: 'A', seconds: 600 } } });
+    let store = new UsageStore(new FakeSettings());
+    await whenLoaded(store);
+    let removed = store.deleteEntry(today, 'a.desktop');
+    store.restoreEntry(today, 'a.desktop', removed);
+    assertEqual(store.getUsageForDate(today),
+        [{ appId: 'a.desktop', displayName: 'A', seconds: 600 }]);
+    store.destroy();
+});
+
+test('restoreEntry: time tracked since the delete is kept, not overwritten', async () => {
+    let today = todayKey();
+    writeStoreFile({});
+    let store = new UsageStore(new FakeSettings());
+    await whenLoaded(store);
+    store.addTime('a.desktop', 'A', 600);
+    let removed = store.deleteEntry(today, 'a.desktop');
+    store.addTime('a.desktop', 'A', 30);
+    store.restoreEntry(today, 'a.desktop', removed);
+    assertEqual(store.getTotalForDate(today), 630);
+    store.destroy();
+});
