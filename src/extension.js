@@ -66,6 +66,16 @@ export default class ScreenTimeExtension extends Extension {
 
     disable() {
         this._settings.disconnectObject(this);
+        // Before the tracker: destroy() banks a final flush, which fires
+        // onChange, which drives the panel label. At Shell shutdown the panel
+        // actors are already torn down, so that write landed on a disposed
+        // St.Label ("has been already disposed") on every logout. The
+        // optional chaining below does not catch it: the indicator object is
+        // still here, only its actor is gone. Nothing should be driving UI
+        // while it is being torn down; the time still reaches disk through
+        // the store's own destroy().
+        if (this._store)
+            this._store.onChange = null;
         this._tracker?.destroy();
         this._tracker = null;
         this._popup?.destroy();
