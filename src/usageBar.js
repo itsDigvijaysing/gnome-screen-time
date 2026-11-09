@@ -1,4 +1,10 @@
 import St from 'gi://St';
+import Clutter from 'gi://Clutter';
+
+// Use orientation where available; older GNOME versions require vertical.
+export const VERTICAL_LAYOUT = 'orientation' in St.BoxLayout.prototype
+    ? {orientation: Clutter.Orientation.VERTICAL}
+    : {vertical: true};
 
 // Shared popup metrics. popupWidget.js and appTimerSection.js stack rows in the
 // same menu, so their widths and neutral tones have to stay in lockstep.
