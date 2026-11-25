@@ -222,6 +222,12 @@ export class UsageTracker {
         // window-backed apps (no .desktop file) get a per-launch `window:<n>` id;
         // WM_CLASS is stable across launches, so key those off it instead.
         if (app.is_window_backed()) {
+            // Desktop Icons NG draws the desktop as a gjs window, so time on
+            // the desktop used to be filed as "gjs" (wmclass:gjs), together
+            // with any other gjs window. It gets its own id, so the two stop
+            // sharing a row; days already recorded keep the old "gjs" entry.
+            if (win.get_gtk_application_id?.() === 'com.rastersoft.ding')
+                return { id: 'desktop', name: 'Desktop' };
             let wmClass = win.get_wm_class();
             if (wmClass)
                 return { id: `wmclass:${wmClass}`, name: app.get_name() || wmClass };

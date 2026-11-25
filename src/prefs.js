@@ -5,7 +5,9 @@ import GLib from 'gi://GLib';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 import { STORE_FILE, knownAppsFromData, dateKey } from './usageStore.js';
 import { formatTime } from './formatTime.js';
-import { getAppLimits, setAppLimit, removeAppLimit } from './appLimits.js';
+import {
+    getAppLimits, setAppLimit, removeAppLimit, pickableApps, limitLabel,
+} from './appLimits.js';
 
 // The chart's ranges. `purge-requested` is a fixed 7-day window defined by
 // the schema, so it gets its own constant: changing what the chart shows must
@@ -393,16 +395,22 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
         });
         page.add(limitsGroup);
 
-        // Only apps you've actually used can be picked, not a full system app scan.
+        // Only apps you've actually used can be picked, and of those only the
+        // ones the app grid still shows: no uninstalled apps, no system
+        // dialogs, no window-only entries. Same rule as the popup's picker.
         const knownApps = knownAppsFromData(data);
-        const appIds = [...knownApps.keys()].sort(
-            (a, b) => knownApps.get(a).localeCompare(knownApps.get(b)));
+        const installed = new Map(Gio.AppInfo.get_all().map(info =>
+            [info.get_id(), {name: info.get_name(), shown: info.should_show()}]));
+        const appName = id => installed.get(id)?.name ?? null;
+        const gridName = id => (installed.get(id)?.shown ? installed.get(id).name : null);
+        const pickable = pickableApps(knownApps, gridName, new Set());
+        const appIds = pickable.map(([id]) => id);
 
         const limitRows = new Map(); // appId -> Adw.ActionRow
 
         const addLimitRow = (appId, minutes) => {
             let row = new Adw.ActionRow({
-                title: knownApps.get(appId) ?? appId,
+                title: limitLabel(appId, appName, knownApps),
                 subtitle: `${minutes} min/day`,
             });
             let removeButton = new Gtk.Button({
@@ -427,16 +435,24 @@ export default class ScreenTimePreferences extends ExtensionPreferences {
             addLimitRow(appId, minutes);
 
         if (appIds.length === 0) {
-            limitsGroup.add(new Adw.ActionRow({
-                title: 'No tracked apps yet',
-                subtitle: 'Use the computer a bit, then come back to set limits.',
-            }));
+            // Tracked time can all belong to things that are not installed
+            // apps (window-only programs, system dialogs), so say which case
+            // this is rather than claim nothing was tracked.
+            limitsGroup.add(new Adw.ActionRow(knownApps.size === 0
+                ? {
+                    title: 'No tracked apps yet',
+                    subtitle: 'Use the computer a bit, then come back to set limits.',
+                }
+                : {
+                    title: 'No installed apps to set a limit for',
+                    subtitle: 'Limits can be set for apps in the app grid that you have used.',
+                }));
             return;
         }
 
         const addRow = new Adw.ActionRow({title: 'Add a limit'});
         const appDropDown = new Gtk.DropDown({
-            model: Gtk.StringList.new(appIds.map(id => knownApps.get(id))),
+            model: Gtk.StringList.new(pickable.map(([, name]) => name)),
             valign: Gtk.Align.CENTER,
         });
         const minutesSpin = new Gtk.SpinButton({

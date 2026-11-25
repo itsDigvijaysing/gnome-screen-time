@@ -1,10 +1,13 @@
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
+import Shell from 'gi://Shell';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { formatTime } from './formatTime.js';
 import { todayKeyFor } from './usageStore.js';
-import { getAppLimits, setAppLimit, removeAppLimit } from './appLimits.js';
+import {
+    getAppLimits, setAppLimit, removeAppLimit, pickableApps, limitLabel,
+} from './appLimits.js';
 import { ROW_W, BAR_W, DIM_OPACITY, VERTICAL_LAYOUT, makeUsageBar } from './usageBar.js';
 
 const STEP_MINUTES = 5;
@@ -16,6 +19,18 @@ const OVER_LIMIT_COLOR = '#e5a50a';
 // Caps the panel to roughly 10 short rows before it scrolls, so a long app
 // list can't run the popup off the bottom of the screen.
 const MAX_PANEL_HEIGHT = 260;
+
+// The installed app's current name, or null if it is not installed.
+function appName(appId) {
+    return Shell.AppSystem.get_default().lookup_app(appId)?.get_name() ?? null;
+}
+
+// The same, but only for apps the app grid shows: hidden helpers such as the
+// crash reporter or the file-chooser portal get null, like uninstalled ones.
+function gridName(appId) {
+    let app = Shell.AppSystem.get_default().lookup_app(appId);
+    return app?.get_app_info()?.should_show() ? app.get_name() : null;
+}
 
 // Inline "Active Timers" panel shown above the popup footer. Reads and writes
 // the same `app-limits` key Preferences uses (via appLimits.js), so a timer
@@ -147,10 +162,12 @@ export class AppTimerSection {
         } else {
             let usage = this._store.getUsageForDate(todayKeyFor(this._settings));
             let usedById = new Map(usage.map(a => [a.appId, a]));
+            // Named from the app itself, not from today's usage: an app not
+            // used yet today used to show its raw id here.
+            let known = this._store.getKnownApps();
             for (let appId of appIds) {
-                let used = usedById.get(appId);
-                this._addTimerRow(appId, used?.displayName ?? appId,
-                    used?.seconds ?? 0, limits[appId], rebuild);
+                this._addTimerRow(appId, limitLabel(appId, appName, known),
+                    usedById.get(appId)?.seconds ?? 0, limits[appId], rebuild);
             }
         }
 
@@ -205,17 +222,17 @@ export class AppTimerSection {
         this._backRow(() => { this._mode = 'list'; }, rebuild);
         this._header('Add a timer for');
 
-        // "Unknown"-named entries are already excluded by getKnownApps().
+        // Tracked apps the app grid still shows, so no uninstalled apps, no
+        // system dialogs and no window-only entries, each under its current
+        // name.
         let known = this._store.getKnownApps();
         let limited = new Set(Object.keys(getAppLimits(this._settings)));
-        let candidates = [...known.entries()]
-            .filter(([id]) => !limited.has(id))
-            .sort((a, b) => a[1].localeCompare(b[1]));
+        let candidates = pickableApps(known, gridName, limited);
 
         if (candidates.length === 0) {
             this._placeholder(known.size === 0
                 ? 'No tracked apps yet'
-                : 'All tracked apps already have a timer');
+                : 'No other apps to add a timer for');
             return;
         }
 
