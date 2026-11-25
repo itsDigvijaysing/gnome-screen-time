@@ -185,6 +185,17 @@ test('destroy: banks the day to disk, and the next store reads it back', async (
     reopened.destroy();
 });
 
+// The Shell never calls disable() at logout, so the shutdown handler saves
+// through this while the store is still alive.
+test('save: writes pending time to disk without destroy()', async () => {
+    let store = await freshStore();
+    store.addTime('a.desktop', 'A', 7);
+    store.save();
+    assertEqual(readStoreFile(),
+        { [todayKey()]: { 'a.desktop': { displayName: 'A', seconds: 7 } } });
+    store.destroy();
+});
+
 test('load: time tracked before the read lands is added to it, not lost', async () => {
     GLib.unlink(STORE_FILE);
     writeStoreFile({
@@ -340,7 +351,7 @@ test('deleteEntry: a day left empty goes too', async () => {
     let store = new UsageStore(new FakeSettings());
     await whenLoaded(store);
     store.deleteEntry(day, 'a.desktop');
-    store._save();
+    store.save();
     assertEqual(day in readStoreFile(), false);
     store.destroy();
 });

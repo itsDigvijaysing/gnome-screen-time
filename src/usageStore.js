@@ -54,7 +54,7 @@ export class UsageStore {
         this._load();
         this._autoSaveId = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT, AUTOSAVE_INTERVAL,
-            () => { this._save(); return GLib.SOURCE_CONTINUE; }
+            () => { this.save(); return GLib.SOURCE_CONTINUE; }
         );
         this._settingsId = settings.connect(
             'changed::retention-days', () => { this._cleanup(); }
@@ -126,7 +126,7 @@ export class UsageStore {
         }
     }
 
-    _save() {
+    save() {
         // Never write before the initial read resolves, or an empty object
         // would clobber the real history on disk.
         if (!this._dirty || !this._loaded) return;
@@ -169,7 +169,7 @@ export class UsageStore {
 
     _onPurgeRequested() {
         if (this._deleteOlderThan(MANUAL_PURGE_DAYS)) {
-            this._save();
+            this.save();
             this.onChange?.();
         }
     }
@@ -291,6 +291,6 @@ export class UsageStore {
             this._settings.disconnect(this._dayStartId);
             this._dayStartId = null;
         }
-        this._save();
+        this.save();
     }
 }

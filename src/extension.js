@@ -25,6 +25,29 @@ export default class ScreenTimeExtension extends Extension {
         };
         this._indicator.setTotal(this._store.getTodayTotal());
 
+        // GNOME Shell 50 never calls disable() at logout. It destroys the
+        // panel, then runs a nested main loop in its own `shutdown` handler
+        // (main.js), where closing windows still change focus and the tracker
+        // still credits time. So once the indicator is gone nothing may drive
+        // UI any more, and the last stretch is saved here, because the
+        // store's destroy() never runs on that path. Handlers run in connect
+        // order, so this one comes after the Shell's nested loop has ended.
+        // Destroying the tracker banks its final flush and stops it
+        // listening, so nothing credited later in the teardown goes unsaved.
+        this._indicator.connectObject('destroy', () => {
+            if (this._store)
+                this._store.onChange = null;
+        }, this);
+        global.connectObject('shutdown', () => {
+            // No limit notifications into a message tray that is shutting
+            // down, whether or not the panel is already gone.
+            if (this._store)
+                this._store.onChange = null;
+            this._tracker?.destroy();
+            this._tracker = null;
+            this._store?.save();
+        }, this);
+
         // connectObject takes the owner object ONCE, after every
         // (signal, handler) pair. Repeating it per pair makes the next pair's
         // owner land where a signal name is expected, and enable() throws
@@ -66,20 +89,15 @@ export default class ScreenTimeExtension extends Extension {
 
     disable() {
         this._settings.disconnectObject(this);
-        // Before the tracker: destroy() banks a final flush, which fires
-        // onChange, which drives the panel label. At Shell shutdown the panel
-        // actors are already torn down, so that write landed on a disposed
-        // St.Label ("has been already disposed") on every logout. The
-        // optional chaining below does not catch it: the indicator object is
-        // still here, only its actor is gone. Nothing should be driving UI
-        // while it is being torn down; the time still reaches disk through
-        // the store's own destroy().
-        if (this._store)
-            this._store.onChange = null;
+        global.disconnectObject(this);
+        // The tracker's final flush still reaches the panel and the limit
+        // check: disable() runs at lock or when switched off, never at
+        // logout, so the indicator is alive here.
         this._tracker?.destroy();
         this._tracker = null;
         this._popup?.destroy();
         this._popup = null;
+        this._indicator?.disconnectObject(this);
         this._indicator?.destroy();
         this._indicator = null;
         this._limitNotifier = null;

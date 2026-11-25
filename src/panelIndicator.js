@@ -50,6 +50,16 @@ export const PanelIndicator = class extends PanelMenu.Button {
         hbox.add_child(this._label);
         this.add_child(hbox);
 
+        // At logout the Shell destroys the panel before its last focus
+        // changes reach the tracker. Forget the children as they go, so a
+        // late update is skipped instead of touching a disposed actor.
+        this._label.connect('destroy', () => {
+            this._label = null;
+        });
+        this._pauseBadge.connect('destroy', () => {
+            this._pauseBadge = null;
+        });
+
         this._totalSeconds = 0;
         this._showTotal = true;
         this._updateLabel();
@@ -67,6 +77,8 @@ export const PanelIndicator = class extends PanelMenu.Button {
     // A pause badges the icon rather than just fading the total, so a pause
     // left on cannot pass for normal tracking.
     setPaused(paused) {
+        if (!this._label || !this._pauseBadge)
+            return;
         this._pauseBadge.visible = paused;
         this._label.opacity = paused ? DIM_OPACITY : 255;
     }
@@ -79,6 +91,8 @@ export const PanelIndicator = class extends PanelMenu.Button {
     // Hidden rather than blank when there is nothing to show, so the panel
     // doesn't reserve dead space next to the icon.
     _updateLabel() {
+        if (!this._label)
+            return;
         let visible = this._showTotal && this._totalSeconds > 0;
         this._label.visible = visible;
         if (visible)
