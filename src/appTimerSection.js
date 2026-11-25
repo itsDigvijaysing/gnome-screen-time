@@ -16,25 +16,19 @@ const MAX_MINUTES = 1440;
 const DEFAULT_MINUTES = 30;
 const UNDER_LIMIT_COLOR = '#3584e4';
 const OVER_LIMIT_COLOR = '#e5a50a';
-// Caps the panel to roughly 10 short rows before it scrolls, so a long app
-// list can't run the popup off the bottom of the screen.
+// Scrolls after about 10 rows, so a long list stays on screen.
 const MAX_PANEL_HEIGHT = 260;
 
-// The installed app's current name, or null if it is not installed.
 function appName(appId) {
     return Shell.AppSystem.get_default().lookup_app(appId)?.get_name() ?? null;
 }
 
-// The same, but only for apps the app grid shows: hidden helpers such as the
-// crash reporter or the file-chooser portal get null, like uninstalled ones.
 function gridName(appId) {
     let app = Shell.AppSystem.get_default().lookup_app(appId);
     return app?.get_app_info()?.should_show() ? app.get_name() : null;
 }
 
-// Inline "Active Timers" panel shown above the popup footer. Reads and writes
-// the same `app-limits` key Preferences uses (via appLimits.js), so a timer
-// set from either place is the exact same data.
+// The "Active Timers" panel above the popup footer.
 export class AppTimerSection {
     constructor(store, settings) {
         this._store = store;
@@ -50,8 +44,7 @@ export class AppTimerSection {
         return this._open;
     }
 
-    // Called only when the popup is freshly opened, so paging between days
-    // while the section is open doesn't collapse it.
+    // Called when the popup opens, not on every rebuild.
     reset() {
         this._open = false;
         this._mode = 'list';
@@ -82,8 +75,6 @@ export class AppTimerSection {
         return btn;
     }
 
-    // Appends the expand content to `menu` as one scrollable item. No-op
-    // while closed. Assumes the caller already added a separator before it.
     build(menu, rebuild) {
         if (!this._open)
             return;
@@ -162,8 +153,6 @@ export class AppTimerSection {
         } else {
             let usage = this._store.getUsageForDate(todayKeyFor(this._settings));
             let usedById = new Map(usage.map(a => [a.appId, a]));
-            // Named from the app itself, not from today's usage: an app not
-            // used yet today used to show its raw id here.
             let known = this._store.getKnownApps();
             for (let appId of appIds) {
                 this._addTimerRow(appId, limitLabel(appId, appName, known),
@@ -222,9 +211,6 @@ export class AppTimerSection {
         this._backRow(() => { this._mode = 'list'; }, rebuild);
         this._header('Add a timer for');
 
-        // Tracked apps the app grid still shows, so no uninstalled apps, no
-        // system dialogs and no window-only entries, each under its current
-        // name.
         let known = this._store.getKnownApps();
         let limited = new Set(Object.keys(getAppLimits(this._settings)));
         let candidates = pickableApps(known, gridName, limited);

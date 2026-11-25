@@ -2,6 +2,7 @@ import { test, assertEqual } from './harness.js';
 import { FakeSettings } from './fakeSettings.js';
 import {
     getAppLimits, setAppLimit, removeAppLimit, pickableApps, limitLabel,
+    claimLimitAlert,
 } from '../src/appLimits.js';
 
 test('getAppLimits: unpacks the key into a plain object', () => {
@@ -83,4 +84,46 @@ test('limitLabel: an uninstalled app keeps the name it was tracked under', () =>
 
 test('limitLabel: the raw id only when nothing else is known', () => {
     assertEqual(limitLabel('gone.desktop', lookup(new Map()), new Map()), 'gone.desktop');
+});
+
+const notified = settings => settings.get_value('limit-notified').deep_unpack();
+
+test('claimLimitAlert: under the limit, nothing to show', () => {
+    let settings = new FakeSettings({}, { 'a.desktop': 30 });
+    assertEqual(claimLimitAlert(settings, 'a.desktop', 30 * 60 - 1, '2026-11-25'), 0);
+    assertEqual(notified(settings), {});
+});
+
+test('claimLimitAlert: an app without a limit never alerts', () => {
+    let settings = new FakeSettings({}, { 'a.desktop': 30 });
+    assertEqual(claimLimitAlert(settings, 'b.desktop', 99999, '2026-11-25'), 0);
+});
+
+test('claimLimitAlert: reaching the limit alerts once and records the day and limit', () => {
+    let settings = new FakeSettings({}, { 'a.desktop': 30 });
+    assertEqual(claimLimitAlert(settings, 'a.desktop', 30 * 60, '2026-11-25'), 30);
+    assertEqual(notified(settings), { 'a.desktop': '2026-11-25 30' });
+    assertEqual(claimLimitAlert(settings, 'a.desktop', 31 * 60, '2026-11-25'), 0);
+});
+
+test('claimLimitAlert: a raised limit alerts again once it is reached', () => {
+    let settings = new FakeSettings({}, { 'a.desktop': 30 });
+    claimLimitAlert(settings, 'a.desktop', 30 * 60, '2026-11-25');
+    setAppLimit(settings, 'a.desktop', 45);
+    assertEqual(claimLimitAlert(settings, 'a.desktop', 40 * 60, '2026-11-25'), 0);
+    assertEqual(claimLimitAlert(settings, 'a.desktop', 45 * 60, '2026-11-25'), 45);
+});
+
+test('claimLimitAlert: a new day alerts again', () => {
+    let settings = new FakeSettings({}, { 'a.desktop': 30 });
+    claimLimitAlert(settings, 'a.desktop', 30 * 60, '2026-11-25');
+    assertEqual(claimLimitAlert(settings, 'a.desktop', 30 * 60, '2026-11-26'), 30);
+});
+
+test('claimLimitAlert: records for apps whose limit was removed are dropped', () => {
+    let settings = new FakeSettings({}, { 'a.desktop': 30, 'b.desktop': 30 });
+    claimLimitAlert(settings, 'a.desktop', 30 * 60, '2026-11-25');
+    removeAppLimit(settings, 'a.desktop');
+    claimLimitAlert(settings, 'b.desktop', 30 * 60, '2026-11-25');
+    assertEqual(notified(settings), { 'b.desktop': '2026-11-25 30' });
 });

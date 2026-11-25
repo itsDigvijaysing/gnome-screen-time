@@ -1,12 +1,15 @@
 import GLib from 'gi://GLib';
 
 // Just enough of Gio.Settings for the modules under test: integer reads, the
-// `app-limits` dictionary, and `changed::<key>` signals a test can fire by
+// `app-limits` and `limit-notified` dictionaries, and `changed::<key>` signals a test can fire by
 // setting a value.
 export class FakeSettings {
     constructor(ints = {}, appLimits = {}) {
         this._ints = { 'retention-days': 90, 'max-interval': 300, 'purge-requested': 0, ...ints };
-        this._values = { 'app-limits': new GLib.Variant('a{si}', appLimits) };
+        this._values = {
+            'app-limits': new GLib.Variant('a{si}', appLimits),
+            'limit-notified': new GLib.Variant('a{ss}', {}),
+        };
         this._handlers = new Map();
         this._nextId = 1;
     }

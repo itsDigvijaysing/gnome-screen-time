@@ -46,5 +46,10 @@
       <summary>Per-app daily time limits</summary>
       <description>Maps an application id to a daily limit in minutes. When today's tracked time for that app reaches its limit, a one-time notification is shown for the rest of the day.</description>
     </key>
+    <key name="limit-notified" type="a{ss}">
+      <default>{}</default>
+      <summary>Limit notifications already shown</summary>
+      <description>Internal, not user-facing. Maps an application id to the day and the limit in minutes of its last limit notification, so each one is shown once a day.</description>
+    </key>
   </schema>
 </schemalist>

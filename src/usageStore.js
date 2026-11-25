@@ -10,9 +10,8 @@ export const STORE_FILE = GLib.build_filenamev([STORE_DIR, 'usage.json']);
 const AUTOSAVE_INTERVAL = 30;
 const MANUAL_PURGE_DAYS = 7;
 
-// Date keys double as the on-disk JSON keys, so every caller formats here.
-// `startHour` moves the day boundary off midnight, so pass it only for a real
-// instant: a key shifted by whole days is already a logical day.
+// Pass `startHour` only for a real instant: a key already shifted by whole
+// days is a logical day.
 export function dateKey(dateTime, startHour = 0) {
     let at = startHour > 0 ? dateTime.add_hours(-startHour) : dateTime;
     return at.format('%Y-%m-%d');
@@ -22,15 +21,12 @@ export function todayKey(startHour = 0) {
     return dateKey(GLib.DateTime.new_now_local(), startHour);
 }
 
-// What the callers holding a settings object want: today, for whichever day
-// boundary the user configured. One place knows the key's name.
 export function todayKeyFor(settings) {
     return todayKey(settings.get_int('day-start-hour'));
 }
 
-// appId -> displayName for every app in `data`, shared by UsageStore and
-// prefs.js so both pick from the same set. Skips "Unknown", Shell's fallback
-// name for windows it can't identify.
+// appId -> displayName, skipping "Unknown" (the Shell's name for windows it
+// cannot identify).
 export function knownAppsFromData(data) {
     let known = new Map();
     for (let day of Object.values(data)) {
@@ -62,8 +58,7 @@ export class UsageStore {
         this._purgeId = settings.connect(
             'changed::purge-requested', () => { this._onPurgeRequested(); }
         );
-        // Moving the boundary re-labels which day "today" is, so anything
-        // showing a total has to redraw even though no time was tracked.
+        // A new day boundary can change which day is today.
         this._dayStartId = settings.connect(
             'changed::day-start-hour', () => { this.onChange?.(); }
         );
@@ -83,8 +78,8 @@ export class UsageStore {
             dir.make_directory_with_parents(null);
     }
 
-    // Async so disk IO can't drop compositor frames (EGO-X-004). Time tracked
-    // before the read lands is merged in, not discarded.
+    // Async so disk IO cannot stall the compositor. Time tracked before the
+    // read finishes is merged in.
     async _load() {
         let loaded = null;
         try {
@@ -92,10 +87,9 @@ export class UsageStore {
                 .load_contents_async(this._cancellable);
             loaded = JSON.parse(new TextDecoder().decode(contents));
         } catch (e) {
-            // Cancelled by destroy(): the store is gone, nothing left to do.
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 return;
-            // A missing file is the normal first-run case, not an error.
+            // No file yet on a first run.
             if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
                 console.error(`[ScreenTime] load error: ${e.message}`);
         }
@@ -115,8 +109,6 @@ export class UsageStore {
                 this._data[date] = apps;
                 continue;
             }
-            // Keep anything tracked while the read was in flight, adding the
-            // stored totals on top of it.
             for (let [appId, info] of Object.entries(apps)) {
                 if (day[appId])
                     day[appId].seconds += info.seconds;
@@ -127,8 +119,7 @@ export class UsageStore {
     }
 
     save() {
-        // Never write before the initial read resolves, or an empty object
-        // would clobber the real history on disk.
+        // Writing before the first read would overwrite the history on disk.
         if (!this._dirty || !this._loaded) return;
         try {
             let json = JSON.stringify(this._data, null, 2);
@@ -143,9 +134,7 @@ export class UsageStore {
         }
     }
 
-    // Zero-second rows written before addTime refused them. They hold no time,
-    // so dropping them changes no total anywhere; it only stops them being
-    // counted as apps. A day left with nothing in it goes too.
+    // Older versions could store zero-second entries.
     _dropEmptyEntries() {
         for (let [date, day] of Object.entries(this._data)) {
             for (let [appId, info] of Object.entries(day)) {
@@ -190,9 +179,7 @@ export class UsageStore {
     }
 
     addTime(appId, displayName, seconds) {
-        // A focus blink shorter than half a second rounds to nothing. Storing it
-        // anyway would add a zero-second app to the day, which inflates the
-        // popup's "Other N apps" count and grows the file for no time at all.
+        // A zero-second entry would still count as an app in the popup.
         let secs = Math.round(seconds);
         if (secs <= 0)
             return;
@@ -201,16 +188,14 @@ export class UsageStore {
         if (!this._data[today])
             this._data[today] = {};
         if (!this._data[today][appId])
-            this._data[today][appId] = { displayName, seconds: 0 };
+            this._data[today][appId] = {displayName, seconds: 0};
         this._data[today][appId].seconds += secs;
         this._data[today][appId].displayName = displayName;
         this._dirty = true;
         this.onChange?.(appId, displayName, this._data[today][appId].seconds);
     }
 
-    // Removes one app's entry from one day, returning it so it can be put
-    // back with restoreEntry(), or null if there was none. A day left empty
-    // goes too.
+    // Returns the removed entry for restoreEntry(), or null.
     deleteEntry(dateKey, appId) {
         let day = this._data[dateKey];
         let entry = day?.[appId];
@@ -221,16 +206,15 @@ export class UsageStore {
             delete this._data[dateKey];
         this._dirty = true;
         this.onChange?.();
-        return { ...entry };
+        return {...entry};
     }
 
-    // Undoes deleteEntry(). Time tracked for the app since the delete is
-    // added to, not overwritten, so nothing recorded in between is lost.
+    // Adds to any time tracked since the delete instead of replacing it.
     restoreEntry(dateKey, appId, entry) {
         this._data[dateKey] ??= {};
         let day = this._data[dateKey];
         let seconds = entry.seconds + (day[appId]?.seconds ?? 0);
-        day[appId] = { ...entry, seconds };
+        day[appId] = {...entry, seconds};
         this._dirty = true;
         this.onChange?.();
     }
@@ -239,8 +223,6 @@ export class UsageStore {
         return this.getTotalForDate(todayKey(this._dayStartHour()));
     }
 
-    // Per-app usage for one day, biggest first, unfiltered. Callers decide
-    // what's worth showing.
     getUsageForDate(dateKey) {
         let day = this._data[dateKey];
         if (!day)
@@ -261,7 +243,6 @@ export class UsageStore {
         return Object.values(day).reduce((s, a) => s + a.seconds, 0);
     }
 
-    // Oldest day still on record, so the UI knows how far back it can page.
     getOldestDate() {
         let keys = Object.keys(this._data);
         if (keys.length === 0)

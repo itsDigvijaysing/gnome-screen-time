@@ -1,29 +1,24 @@
 import GLib from 'gi://GLib';
 import { dateKey } from './usageStore.js';
 
-// The `paused-until` setting: 0 is not paused, MANUAL is paused until the
-// user resumes, anything else is the unix time the pause lapses. No Shell
-// imports, so plain gjs tests cover it.
+// `paused-until`: 0 is not paused, MANUAL is paused until resumed, anything
+// else is the unix time the pause ends.
 export const MANUAL = -1;
 
-const LENGTHS = { '30m': 30 * 60, '1h': 3600 };
-// Timed chips add up, so they stop here; longer than a day is what Manual is for.
+const LENGTHS = {'30m': 30 * 60, '1h': 3600};
 const MAX_TIMED = 24 * 3600;
 
 export function isPaused(until, now) {
     return until === MANUAL || until > now;
 }
 
-// Unix time the next day starts, for the configured day boundary.
 function nextDayStart(now, startHour) {
     let today = dateKey(GLib.DateTime.new_from_unix_local(now), startHour);
     let [y, m, d] = today.split('-').map(Number);
     return GLib.DateTime.new_local(y, m, d, startHour, 0, 0).add_days(1).to_unix();
 }
 
-// The `paused-until` value for a chip: '30m', '1h', 'tomorrow' or 'manual'.
-// A timed chip adds to a timed pause still running (`current`), so pressing
-// it again extends; off manual, tomorrow or no pause, it counts from now.
+// A timed choice extends a timed pause still running (`current`).
 export function pauseUntil(choice, now, startHour, current = 0) {
     if (choice === 'manual')
         return MANUAL;
@@ -33,8 +28,7 @@ export function pauseUntil(choice, now, startHour, current = 0) {
     return Math.min(from + LENGTHS[choice], now + MAX_TIMED);
 }
 
-// How to describe a stored value: null when not paused, 'manual',
-// 'tomorrow' when it lapses at the next day boundary, otherwise 'until'.
+// null when not paused, else 'manual', 'tomorrow' or 'until'.
 export function pauseKind(until, now, startHour) {
     if (!isPaused(until, now))
         return null;

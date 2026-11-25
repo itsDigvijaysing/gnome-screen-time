@@ -14,13 +14,10 @@ export const PanelIndicator = class extends PanelMenu.Button {
     _init() {
         super._init(0.5, 'Screen Time');
 
-        const hbox = new St.BoxLayout({
+        let hbox = new St.BoxLayout({
             style_class: 'panel-status-menu-box',
         });
-        // The pause badge sits over the icon's bottom-right corner, so the
-        // icon still says what the indicator is while it says "paused".
-        // Centred, so the stack is the icon's height rather than the panel's
-        // and the badge lands on the icon's corner.
+        // The pause badge overlays the icon's bottom-right corner.
         let iconStack = new St.Widget({
             layout_manager: new Clutter.BinLayout(),
             y_align: Clutter.ActorAlign.CENTER,
@@ -32,7 +29,6 @@ export const PanelIndicator = class extends PanelMenu.Button {
         this._pauseBadge = new St.Icon({
             icon_name: 'media-playback-pause-symbolic',
             icon_size: 10,
-            // Faded, so it reads as secondary to the icon it sits on.
             opacity: DIM_OPACITY,
             x_expand: true,
             y_expand: true,
@@ -50,9 +46,7 @@ export const PanelIndicator = class extends PanelMenu.Button {
         hbox.add_child(this._label);
         this.add_child(hbox);
 
-        // At logout the Shell destroys the panel before its last focus
-        // changes reach the tracker. Forget the children as they go, so a
-        // late update is skipped instead of touching a disposed actor.
+        // At logout the panel is destroyed before the tracker stops.
         this._label.connect('destroy', () => {
             this._label = null;
         });
@@ -74,8 +68,6 @@ export const PanelIndicator = class extends PanelMenu.Button {
         this._updateLabel();
     }
 
-    // A pause badges the icon rather than just fading the total, so a pause
-    // left on cannot pass for normal tracking.
     setPaused(paused) {
         if (!this._label || !this._pauseBadge)
             return;
@@ -88,8 +80,6 @@ export const PanelIndicator = class extends PanelMenu.Button {
         this._updateLabel();
     }
 
-    // Hidden rather than blank when there is nothing to show, so the panel
-    // doesn't reserve dead space next to the icon.
     _updateLabel() {
         if (!this._label)
             return;

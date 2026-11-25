@@ -1,7 +1,4 @@
-/* Loaded automatically by GNOME Shell; never load it manually.
- * Hover states live here because inline `style` cannot express pseudo-classes.
- * Colours are deliberately neutral gray so they read correctly on both light
- * and dark Shell themes. */
+/* Hover states: inline `style` cannot express pseudo-classes. */
 
 .screen-time-nav-button,
 .screen-time-settings-button {
@@ -24,9 +21,7 @@
     transition-duration: 150ms;
 }
 
-/* The pause and resume button on the total card. The card is always a light
- * gradient, so this darkens rather than using the neutral gray above. Padding
- * is deliberate: the 3px version of this button was hard to click. */
+/* The card is a light gradient in both themes, so this darkens. */
 .screen-time-card-button {
     padding: 5px;
     border-radius: 99px;

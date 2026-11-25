@@ -12,21 +12,15 @@ import { ROW_W, DIM_OPACITY, VERTICAL_LAYOUT, makeUsageBar } from './usageBar.js
 import { pauseUntil, pauseKind } from './pause.js';
 
 const MAX_VISIBLE = 5;
-// The edit pen sits at the row's right edge, under the end of the time
-// label, in the room bars already leave there; bars stop a few pixels
-// short of it. The Other row keeps the same length so every bar matches.
+const MIN_ROW_SECONDS = 60;
+const COLORS = ['#3584e4', '#33d17a', '#e5a50a', '#9141ac', '#ed333b'];
+// Bars stop short of the edit pen at the end of each row.
 const PEN_W = 16;
 const EDIT_BAR_W = ROW_W - PEN_W - 6;
-// Resting opacity of the pen: faint until its row is hovered.
 const PEN_OPACITY = 70;
-// The pause row's label, capped so no wording can widen the whole popup. The
-// icon, the expander triangle and the item's padding sit outside the label,
-// which is what the subtraction covers.
+// Fixed, so a long pause label cannot widen the popup.
 const PAUSE_LABEL_W = ROW_W - 76;
-// choice, label, and the label to use while a timed pause is already running,
-// where a timed choice adds to the time left instead of replacing it. Spelling
-// that out ("Add 30 minutes") is only possible because these are menu rows
-// now: as chips on one 230px line there was no room to say it.
+// [choice, label, label while a timed pause is running]
 const PAUSE_CHOICES = [
     ['30m', '30 minutes', '+30 min'],
     ['1h', '1 hour', '+1 hour'],
@@ -37,10 +31,8 @@ const PAUSE_CHOICES = [
 function nowSeconds() {
     return Math.floor(Date.now() / 1000);
 }
-const MIN_ROW_SECONDS = 60;
-const COLORS = ['#3584e4', '#33d17a', '#e5a50a', '#9141ac', '#ed333b'];
 
-// The card paints its own background, so it needs its own dark-mode foreground too.
+// Dark text on the card's light gradient, in either theme.
 const CARD_FG = '#241f31';
 
 // Adwaita palette; each tier lightens one shade on hover.
@@ -50,7 +42,6 @@ const USAGE_TIERS = [
     {limit: Infinity, from: '#ffbdb6', to: '#f66151', hoverFrom: '#ffd6d1', hoverTo: '#ffbdb6'},
 ];
 
-// Grey while tracking is paused, whatever the usage: not counting.
 const PAUSED_TIER = {from: '#deddda', to: '#c0bfbc', hoverFrom: '#f6f5f4', hoverTo: '#deddda'};
 
 function tierFor(seconds) {
@@ -92,8 +83,6 @@ export class PopupWidget {
         this._openPrefs = openPrefs;
         this._date = todayKeyFor(settings);
         this._timerSection = new AppTimerSection(store, settings);
-        // Row editing: the app whose action line is open, and the last
-        // delete, undoable until the popup closes.
         this._editing = null;
         this._undo = null;
         this._otherExpanded = false;
@@ -106,26 +95,19 @@ export class PopupWidget {
             else
                 this._undo = null;
         });
-        // A pause can end, or be changed, while the popup is open: the
-        // tracker clears one that lapses. Follow it rather than show a
-        // pause that no longer holds.
+        // The tracker clears a pause that lapses while the popup is open.
         this._pauseId = this._settings.connect('changed::paused-until',
             () => this._rebuildSoon());
     }
 
-    // _build() calls menu.removeAll(), which destroys every item in the menu,
-    // including the button whose `clicked` handler is still on the stack when
-    // a pause chip or the pause button writes the setting. Destroying an actor
-    // inside its own handler leaves Clutter's pointer grab pointing at a dead
-    // actor, and the *next* click is swallowed: pause, then resume does
-    // nothing until you click twice. Deferring to an idle lets the click
-    // finish before the tree is torn down.
+    // Rebuilding inside a button's click handler destroys that button while
+    // Clutter still holds its grab, and the next click is lost.
     _rebuildSoon() {
         if (this._rebuildId)
             return;
         this._rebuildId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._rebuildId = 0;
-            if (this._menu?.isOpen)
+            if (this._menu.isOpen)
                 this._build();
             return GLib.SOURCE_REMOVE;
         });
@@ -139,8 +121,7 @@ export class PopupWidget {
         this._build();
     }
 
-    // How far back paging is allowed: every day in the retention window,
-    // even empty ones (they render a "no data" panel instead of a dead arrow).
+    // Every day in the retention window can be paged to, even empty ones.
     _earliestKey() {
         let retention = this._settings.get_int('retention-days');
         if (retention > 0)
@@ -152,11 +133,8 @@ export class PopupWidget {
         this._menu.removeAll();
 
         let all = this._store.getUsageForDate(this._date);
-        // Same number the panel label shows, so the two can never disagree.
         let total = this._store.getTotalForDate(this._date);
-        // A delete still undoable keeps its place, so nothing moves under
-        // the pointer: a placeholder at the entry's old rank, which the
-        // total and the Other row leave out.
+        // A deleted entry keeps its place as an undo row until the popup closes.
         let undo = this._undo?.date === this._date ? this._undo : null;
         if (undo) {
             all.push({appId: undo.appId, displayName: undo.name,
@@ -184,17 +162,11 @@ export class PopupWidget {
         } else {
             let top = all.filter(a => a.seconds >= MIN_ROW_SECONDS)
                 .slice(0, MAX_VISIBLE);
-            // Everything not given its own row, including the sub-minute apps,
-            // is folded in here, so the rows reconcile with the total.
+            // Everything without its own row, so the rows add up to the total.
             let rest = all.filter(a => !top.includes(a));
             let restSeconds = rest.reduce((s, a) => s + (a.deleted ? 0 : a.seconds), 0);
-            // Bars are drawn against the longest row (the fold counts as one)
-            // so the tail isn't a row of slivers; the percentages stay shares
-            // of the day. A row awaiting undo keeps its old seconds so it
-            // holds its rank, but it draws no bar, so it is left out of the
-            // scale: otherwise deleting the biggest app would shrink every
-            // remaining bar. The trailing 1 is the floor for an empty or
-            // all-deleted day, where Math.max would give -Infinity.
+            // Bars scale to the longest row. Undo rows draw no bar, so they
+            // are left out.
             let scale = Math.max(restSeconds,
                 ...top.filter(a => !a.deleted).map(a => a.seconds), 1);
             for (let i = 0; i < top.length; i++)
@@ -204,7 +176,7 @@ export class PopupWidget {
                 this._addOtherAppsRow(rest, restSeconds, total,
                     COLORS[top.length % COLORS.length], scale);
             } else if (rest.length > 0) {
-                // Only the deleted app was left to fold: no Other row for it.
+                // Only the deleted app was left: no Other row.
                 this._addAppRow(rest[0], total, null, scale);
             }
         }
@@ -275,7 +247,6 @@ export class PopupWidget {
         item.track_hover = false;
         item.style = 'padding: 0;';
 
-        // A pause is about now, so only today's card shows it.
         let isToday = this._date === todayKeyFor(this._settings);
         let paused = isToday && pauseKind(this._settings.get_int64('paused-until'),
             nowSeconds(), this._settings.get_int('day-start-hour')) !== null;
@@ -299,20 +270,16 @@ export class PopupWidget {
             y_align: Clutter.ActorAlign.CENTER,
             style: 'font-size: 17px; font-weight: 800; color: ' + CARD_FG + ';',
         }));
-        // Pause and resume live on the card, next to the number they affect.
-        // Today only: a pause is about now, not about the day being viewed.
         if (isToday)
             card.add_child(this._pauseButton(paused));
 
-        // The gradient is per-usage and therefore inline, which outranks any
-        // stylesheet :hover rule, so the hover swap is done here instead.
+        // An inline gradient cannot be changed by a stylesheet :hover rule.
         card.connect('notify::hover', () => {
             card.style = cardStyle(tier, card.hover);
         });
 
-        // The whole card toggles, so the small icon is the state indicator
-        // rather than the only hit target. St.Button stops the release event
-        // itself, so clicking the icon does not also run this and undo it.
+        // St.Button stops the release event, so a click on the icon does
+        // not toggle twice.
         if (isToday) {
             card.connect('button-release-event', () => {
                 this._setPause(paused ? null : 'manual');
@@ -324,30 +291,13 @@ export class PopupWidget {
         this._menu.addMenuItem(item);
     }
 
-    // Pause while tracking, play while paused. Pausing starts open-ended;
-    // the chips under the card then set a length.
-
     _setPause(choice) {
         let until = choice === null ? 0 : pauseUntil(choice, nowSeconds(),
             this._settings.get_int('day-start-hour'),
             this._settings.get_int64('paused-until'));
-        // The write rebuilds the popup through the changed handler.
         this._settings.set_int64('paused-until', until);
     }
 
-    // Two always-present rows, on today only, because a pause is about now
-    // and not about the day being looked at.
-    //
-    // These are plain Shell menu items on purpose. The previous version was a
-    // custom row of chips, which needed the extension's own stylesheet to be
-    // readable at all: when that stylesheet failed to load the chips rendered
-    // as oversized unstyled text that overflowed the popup. Native items are
-    // themed by the Shell, so the worst case is plain, never broken. It also
-    // removes the 230px width ceiling, which is what forced labels like
-    // "+30m" that said nothing about what they added to.
-    // 16px glyph in a padded, rounded hit area. The first version of this was
-    // a 12px icon with 3px of padding and was genuinely hard to click, which
-    // read as "resume is broken" on top of the real grab bug underneath it.
     _pauseButton(paused) {
         let btn = new St.Button({
             child: new St.Icon({
@@ -367,14 +317,7 @@ export class PopupWidget {
         return btn;
     }
 
-    // Only while a pause is running, and only on today. The card's button is
-    // what starts one; this row says what is holding and opens the durations.
-    //
-    // Native menu items on purpose. The version before this was a custom chip
-    // row that needed the extension's own stylesheet just to be readable, so
-    // when that stylesheet failed to load it rendered as oversized unstyled
-    // text overflowing the popup. Shell items are themed by the Shell: the
-    // worst case is plain, never broken.
+    // While paused: when it ends, and durations to change it.
     _addPauseBlock() {
         if (this._date !== todayKeyFor(this._settings))
             return;
@@ -391,58 +334,39 @@ export class PopupWidget {
         let sub = new PopupMenu.PopupSubMenuMenuItem(
             this._pauseStateText(kind, until), true);
         sub.icon.icon_name = 'media-playback-pause-symbolic';
-        // Pinned width plus ellipsis: a menu sizes itself to its widest child,
-        // so without this an unusually long end time would widen the popup and
-        // drag the card and every app row out with it.
         sub.label.style = `width: ${PAUSE_LABEL_W}px;`;
         sub.label.clutter_text.ellipsize = Pango.EllipsizeMode.END;
-        // Choosing a duration would otherwise dismiss the whole popup: an item
-        // activating asks its top menu to close. Scoped to this submenu, so the
-        // footer's settings button still closes the menu as it should.
+        // Keep the popup open when a duration is chosen.
         sub.menu.itemActivated = () => {};
         sub.menu.connect('open-state-changed', (m, open) => {
             this._pauseMenuOpen = open;
         });
 
         for (let [choice, label, addLabel] of PAUSE_CHOICES) {
-            // While a timed pause runs, the two durations add to the time
-            // left, so they say "+30 min" and pressing one again extends.
-            // From an open-ended or until-tomorrow pause there is no end to
-            // add to, so they set one instead and read as plain durations.
+            // During a timed pause the durations add to the time left.
             let item = new PopupMenu.PopupMenuItem(
                 kind === 'until' ? addLabel : label);
-            // Only the two open-ended choices are states a tick can describe.
-            // '30m' and '1h' are actions, never equal to `kind`, so they never
-            // get one; and a timed pause ends at a clock time no single choice
-            // represents, which the row's own title already spells out.
             item.setOrnament(choice === kind
                 ? PopupMenu.Ornament.CHECK
                 : PopupMenu.Ornament.NONE);
-            // A ticked row is the current state, so pressing it again
-            // clears it and resumes. The two durations are never ticked, so
-            // they are unaffected and keep adding.
+            // Choosing the ticked state again resumes.
             item.connect('activate',
                 () => this._setPause(choice === kind ? null : choice));
             sub.menu.addMenuItem(item);
         }
         this._menu.addMenuItem(sub);
-        // Setting a duration rewrites paused-until, which rebuilds the whole
-        // menu, which would collapse this. Reopen it so the list stays put
-        // under the pointer. Same trick the App Timer section already uses.
+        // Choosing a duration rebuilds the menu, so reopen this submenu.
+        // GNOME 51 takes an options object, older versions a boolean.
         if (this._pauseMenuOpen)
-            // GNOME 51 takes an options object to disable animation; older versions take false.
             sub.menu.open(parseInt(Config.PACKAGE_VERSION) >= 51 ? {animate: false} : false);
     }
 
-    // When the pause ends, and nothing else. An earlier version appended how
-    // long was left, which read well but made this the widest row in the menu
-    // and stretched the card and every app row along with it.
     _pauseStateText(kind, until) {
         if (kind === 'manual')
             return 'Paused till you resume';
         if (kind === 'tomorrow')
             return 'Paused till tomorrow';
-        // A pause runs at most a day, so the clock time alone is unambiguous.
+        // A pause lasts at most a day, so the time alone is enough.
         return `Paused till ${DateUtils.formatTime(
             GLib.DateTime.new_from_unix_local(until), {timeOnly: true})}`;
     }
@@ -480,8 +404,6 @@ export class PopupWidget {
         let pen = this._penButton(app);
         barLine.add_child(pen);
         row.add_child(barLine);
-        // The pen brightens while its row is hovered, and stays bright
-        // while its line is open.
         row.reactive = true;
         row.track_hover = true;
         row.connect('notify::hover', () => {
@@ -496,7 +418,6 @@ export class PopupWidget {
         return items;
     }
 
-    // Opens or closes this app's action line; one row at a time.
     _penButton(app) {
         let open = this._editing === app.appId;
         let btn = new St.Button({
@@ -515,8 +436,6 @@ export class PopupWidget {
         return btn;
     }
 
-    // Delete removes this day's entry, with an undo line until the popup
-    // closes.
     _addActionsLine(app) {
         let item = new PopupMenu.PopupBaseMenuItem({activate: false});
         item.track_hover = false;
@@ -528,9 +447,8 @@ export class PopupWidget {
         line.add_child(this._lineButton('Delete', () => {
             let entry = this._store.deleteEntry(this._date, app.appId);
             if (entry) {
-                // The focused app earns new time after a delete, so it can be
-                // deleted again before the first is undone. Fold the earlier
-                // delete in, or its time could never be restored.
+                // Deleted again before an undo: fold in the first delete so
+                // Undo restores both.
                 let prev = this._undo;
                 if (prev?.date === this._date && prev.appId === app.appId)
                     entry.seconds += prev.entry.seconds;
@@ -559,7 +477,6 @@ export class PopupWidget {
         return btn;
     }
 
-    // Stands in for the row just deleted, until the popup closes.
     _addUndoRow() {
         let undo = this._undo;
         let item = new PopupMenu.PopupBaseMenuItem({activate: false});
@@ -615,15 +532,12 @@ export class PopupWidget {
         topRow.add_child(expandArrow);
         row.add_child(topRow);
 
-        // No pen for a fold of many apps; the gap keeps the bars aligned.
         row.add_child(makeUsageBar(fillW, color, EDIT_BAR_W));
 
         let btn = new St.Button({child: row, style: 'padding: 0;'});
         item.add_child(btn);
         this._menu.addMenuItem(item);
 
-        // Kept on the widget, so opening an app's action line in here (which
-        // rebuilds the popup) leaves the list open.
         let otherItems = [];
         for (let i = 0; i < otherApps.length; i++) {
             otherItems.push(...this._addAppRow(otherApps[i], total,
@@ -649,7 +563,7 @@ export class PopupWidget {
 
         let row = new St.BoxLayout({x_expand: true, style: 'padding: 0 8px 2px 8px;'});
         row.add_child(this._timerSection.createToggleButton(() => this._build()));
-        row.add_child(new St.BoxLayout({x_expand: true}));   // pushes the settings button right
+        row.add_child(new St.BoxLayout({x_expand: true}));
 
         let btn = new St.Button({
             child: new St.Icon({icon_name: 'preferences-system-symbolic', icon_size: 14}),
@@ -659,7 +573,7 @@ export class PopupWidget {
         });
         btn.connect('clicked', () => {
             this._menu.close();
-            this._openPrefs?.();
+            this._openPrefs();
         });
         row.add_child(btn);
 
@@ -668,8 +582,6 @@ export class PopupWidget {
     }
 
     destroy() {
-        // The menu itself is owned by PanelIndicator, but drop the handler
-        // explicitly so a late emission can't reach an already-destroyed store.
         if (this._openId) {
             this._menu.disconnect(this._openId);
             this._openId = null;

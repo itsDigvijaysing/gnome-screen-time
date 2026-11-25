@@ -4,7 +4,7 @@ A GNOME Shell extension that tracks how long you spend in each app, macOS Screen
 
 The panel shows today's total at a glance. Click it for a per-app breakdown, and step back through previous days one at a time.
 
-![Screen Time popup](assets/Look.gif)
+![Screen Time popup](assets/GNOME_Screen_Time.jpg)
 
 ## Features
 
