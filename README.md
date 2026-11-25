@@ -11,17 +11,17 @@ The panel shows today's total at a glance. Click it for a per-app breakdown, and
 - **Panel indicator:** today's total next to the clock, or just the icon if you prefer.
 - **Per-app breakdown:** top five apps with usage bars (drawn against the longest row, so small apps stay visible) and percentages of the day; everything else folds into a collapsible "Other N apps" row, so the numbers always add up to the total.
 - **Day-by-day history:** `‹ Today ›` steps back one day at a time.
-- **App time limits:** set a daily limit per app and get a desktop notification once you cross it.
+- **App time limits:** set a daily limit for any installed app you have used and get a desktop notification once you cross it.
 - **Delete:** the pen beside an app's bar deletes that day's entry for it, with an undo until the popup closes.
 - **Pause:** stop counting from the total card, until you resume, for a set time, or until tomorrow; the panel icon carries a pause badge meanwhile.
-- **7-day chart** in preferences, with configurable retention and a one-click purge.
+- **History chart** in preferences over 7, 30 or 90 days, with configurable retention and a one-click purge.
 - **Presence-aware:** time on the lock screen, while the screen is blanked, or while suspended is never counted.
 - **Idle detection:** counting stops after 10 minutes without keyboard or mouse input, unless something is inhibiting idle the way a playing video does.
 - **Local only:** a plain JSON file on your disk. No network access, no telemetry.
 
 ## Requirements
 
-GNOME Shell 47, 48, 49 or 50. X11 or Wayland.
+GNOME Shell 47, 48, 49, 50 or 51. X11 or Wayland.
 
 ## Install
 

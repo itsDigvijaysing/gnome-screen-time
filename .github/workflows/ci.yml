@@ -70,12 +70,23 @@ jobs:
           s = r['summary']
           n, status = s['finding_count'], s['status']
           print(f"shexli status={status} findings={n} severities={s.get('severity_counts', {})}")
+          # shexli 0.2.1 calls any shell-version above 50 an implausible
+          # future release, but GNOME 51 shipped in September 2026. Excuse
+          # that one rule only while every declared version is a stable 47
+          # to 51. Drop this once shexli knows about 51.
+          versions = json.load(open('src/metadata.json'))['shell-version']
+          excuse = all(v.isdigit() and 47 <= int(v) <= 51 for v in versions)
+          left = []
           for f in r['findings']:
+              excused = excuse and f.get('rule_id') == 'EGO-M-004'
               print(f"  [{f.get('severity','?')}] {f.get('rule_id','?')}: "
-                    f"{f.get('message','?')} ({f.get('path','?')})")
-          if n != 0 or status != 'clean':
-              sys.exit(f"FAIL: extensions.gnome.org review would flag this ({n} finding(s)).")
-          print("clean: 0 findings, 0 warnings, 0 errors")
+                    f"{f.get('message','?')} ({f.get('path','?')})"
+                    + ("  (excused: shexli predates GNOME 51)" if excused else ""))
+              if not excused:
+                  left.append(f)
+          if left or status not in ('clean', 'issues_found'):
+              sys.exit(f"FAIL: extensions.gnome.org review would flag this ({len(left)} finding(s)).")
+          print(f"clean: {len(left)} findings after excusing the GNOME 51 version check")
           EOF
 
       - name: Upload the lint report

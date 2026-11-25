@@ -527,8 +527,15 @@ export class PopupWidget {
 
         line.add_child(this._lineButton('Delete', () => {
             let entry = this._store.deleteEntry(this._date, app.appId);
-            if (entry)
+            if (entry) {
+                // The focused app earns new time after a delete, so it can be
+                // deleted again before the first is undone. Fold the earlier
+                // delete in, or its time could never be restored.
+                let prev = this._undo;
+                if (prev?.date === this._date && prev.appId === app.appId)
+                    entry.seconds += prev.entry.seconds;
                 this._undo = {date: this._date, appId: app.appId, entry, name: app.displayName};
+            }
             this._closeEdit();
         }));
         item.add_child(line);
