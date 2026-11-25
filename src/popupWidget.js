@@ -4,10 +4,11 @@ import Clutter from 'gi://Clutter';
 import Pango from 'gi://Pango';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as DateUtils from 'resource:///org/gnome/shell/misc/dateUtils.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import { formatTime } from './formatTime.js';
 import { todayKey, todayKeyFor, dateKey } from './usageStore.js';
 import { AppTimerSection } from './appTimerSection.js';
-import { ROW_W, DIM_OPACITY, makeUsageBar } from './usageBar.js';
+import { ROW_W, DIM_OPACITY, VERTICAL_LAYOUT, makeUsageBar } from './usageBar.js';
 import { pauseUntil, pauseKind } from './pause.js';
 
 const MAX_VISIBLE = 5;
@@ -429,7 +430,8 @@ export class PopupWidget {
         // menu, which would collapse this. Reopen it so the list stays put
         // under the pointer. Same trick the App Timer section already uses.
         if (this._pauseMenuOpen)
-            sub.menu.open(false);
+            // GNOME 51 takes an options object to disable animation; older versions take false.
+            sub.menu.open(parseInt(Config.PACKAGE_VERSION) >= 51 ? {animate: false} : false);
     }
 
     // When the pause ends, and nothing else. An earlier version appended how
@@ -454,7 +456,7 @@ export class PopupWidget {
         let pct = total > 0 ? Math.round(app.seconds / total * 100) : 0;
 
         let row = new St.BoxLayout({
-            vertical: true,
+            ...VERTICAL_LAYOUT,
             style: 'padding: 4px 10px; width: ' + ROW_W + 'px;',
         });
 
@@ -582,7 +584,7 @@ export class PopupWidget {
         let fillW = Math.round(EDIT_BAR_W * otherTotal / scale);
 
         let row = new St.BoxLayout({
-            vertical: true,
+            ...VERTICAL_LAYOUT,
             style: 'padding: 4px 10px; width: ' + ROW_W + 'px;',
         });
 

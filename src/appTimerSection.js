@@ -5,7 +5,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { formatTime } from './formatTime.js';
 import { todayKeyFor } from './usageStore.js';
 import { getAppLimits, setAppLimit, removeAppLimit } from './appLimits.js';
-import { ROW_W, BAR_W, DIM_OPACITY, makeUsageBar } from './usageBar.js';
+import { ROW_W, BAR_W, DIM_OPACITY, VERTICAL_LAYOUT, makeUsageBar } from './usageBar.js';
 
 const STEP_MINUTES = 5;
 const MIN_MINUTES = 5;
@@ -73,7 +73,7 @@ export class AppTimerSection {
         if (!this._open)
             return;
 
-        this._box = new St.BoxLayout({vertical: true, style: `width: ${ROW_W}px;`});
+        this._box = new St.BoxLayout({...VERTICAL_LAYOUT, style: `width: ${ROW_W}px;`});
         if (this._mode === 'pick-app')
             this._buildPickApp(rebuild);
         else if (this._mode === 'pick-duration')
@@ -162,7 +162,7 @@ export class AppTimerSection {
 
     _addTimerRow(appId, displayName, usedSeconds, limitMinutes, rebuild) {
         let row = new St.BoxLayout({
-            vertical: true,
+            ...VERTICAL_LAYOUT,
             style: `padding: 4px 10px; width: ${ROW_W}px;`,
         });
 
